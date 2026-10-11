@@ -103,7 +103,7 @@ function Register() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          className="w-full rounded bg-pink-300 py-2 font-medium text-pink-950 hover:bg-pink-400 disabled:opacity-60"
         >
           {loading ? 'Creating account...' : 'Register'}
         </button>

@@ -53,7 +53,7 @@ function Home() {
           <span className="text-slate-600">{user.name}</span>
           <button
             onClick={handleLogout}
-            className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            className="rounded bg-pink-300 px-4 py-2 text-sm font-medium text-pink-950 hover:bg-pink-400"
           >
             Logout
           </button>
