@@ -5,26 +5,44 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import cookieParser from "cookie-parser";
 
+// ---------------------------------------------------------------------------
+// Config
+// Every value can be overridden with an environment variable; the defaults
+// match a local XAMPP/MySQL install and the Vite dev server.
+// ---------------------------------------------------------------------------
+const PORT = process.env.PORT || 8081;
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const SALT_ROUNDS = 10;
 const COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax",
-  maxAge: 24 * 60 * 60 * 1000,
+  maxAge: 24 * 60 * 60 * 1000, // 1 day, same as the JWT lifetime
 };
 
+// ---------------------------------------------------------------------------
+// App and database
+// ---------------------------------------------------------------------------
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+// credentials: true lets the browser send the login cookie from the frontend
+app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
 app.use(cookieParser());
 
+// Tables are created by schema.sql
 const db = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "signup_login",
+  host: process.env.DB_HOST || "localhost",
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASSWORD || "",
+  database: process.env.DB_NAME || "signup_login",
 });
 
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
+// Put this in front of any route that needs a logged-in user.
+// It reads the JWT from the "token" cookie and stores its payload in req.user.
 const verifyUser = (req, res, next) => {
   const token = req.cookies.token;
   if (!token) {
@@ -38,6 +56,11 @@ const verifyUser = (req, res, next) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
+// POST /register  { name, email, password }  ->  201 { message }
 app.post("/register", async (req, res) => {
   const { name, email, password } = req.body ?? {};
   if (!name || !email || !password) {
@@ -68,6 +91,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
+// POST /login  { email, password }  ->  sets the "token" cookie, { id, name, email }
 app.post("/login", async (req, res) => {
   const { email, password } = req.body ?? {};
   if (!email || !password) {
@@ -94,15 +118,17 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// GET /me  ->  { id, name } of the logged-in user (401 if not logged in)
 app.get("/me", verifyUser, (req, res) => {
   return res.json({ id: req.user.id, name: req.user.name });
 });
 
+// POST /logout  ->  clears the "token" cookie
 app.post("/logout", (req, res) => {
   res.clearCookie("token", { httpOnly: true, sameSite: "lax" });
   return res.json({ message: "Logged out" });
 });
 
-app.listen(8081, () => {
-  console.log("Server is running....");
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
