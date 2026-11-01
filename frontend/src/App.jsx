@@ -8,11 +8,24 @@ import Report from './pages/report.jsx'
 import Party from './pages/party.jsx'
 import Setting from './pages/setting.jsx'
 
+// Import ฝั่ง Admin (แก้ไข path ให้ถูกต้องตรงกับชื่อไฟล์จริง)
+import AdminHome from './pages/adminHome.jsx'
+import AdminDashboard from './pages/AdminDashboard.jsx'
+import ProtectedRoute from './ProtectedRoute.jsx'
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />}>
+        {/* === ฝั่ง USER === */}
+        <Route 
+          path="/" 
+          element={
+            <ProtectedRoute allowedRole="user">
+              <Home />
+            </ProtectedRoute>
+          }
+        >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="data" element={<Data />} />
@@ -20,8 +33,24 @@ function App() {
           <Route path="party" element={<Party />} />
           <Route path="setting" element={<Setting />} />
         </Route>
+
+        {/* === ฝั่ง ADMIN === */}
+        <Route 
+          path="/admin" 
+          element={
+            <ProtectedRoute allowedRole="admin">
+              <AdminHome />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+        </Route>
+
+        {/* === หน้า PUBLIC === */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   )
