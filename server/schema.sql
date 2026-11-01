@@ -1,7 +1,6 @@
-CREATE DATABASE IF NOT EXISTS signup_login;
 USE signup_login;
 
--- 1. ตาราง users
+-- 1. สร้างตาราง users (กรณีเครื่องที่ยังไม่มีเลย)
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -11,7 +10,11 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. ตาราง family_members
+-- 2. กรณีเครื่องที่มีตาราง users อยู่แล้วแต่ไม่มีคอลัมน์ role
+-- (ถ้ารันแล้วขึ้น Warning ว่ามีคอลัมน์อยู่แล้ว สามารถข้ามได้เลยครับ)
+ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user';
+
+-- 3. สร้างตาราง family_members
 CREATE TABLE IF NOT EXISTS family_members (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
