@@ -86,10 +86,11 @@ function Home() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-100">
-      <aside className="w-56 shrink-0 bg-pink-50 px-4 py-5 text-slate-600 max-sm:w-40 max-sm:px-3">
+    <div className="flex min-h-screen bg-white">
+      {/* Sidebar ด้านซ้าย */}
+      <aside className="w-56 shrink-0 bg-pink-50 px-4 py-5 text-slate-600 max-sm:w-40 max-sm:px-3 border-r border-rose-100/50">
         <div className="mb-8 flex items-center gap-2.5 px-1">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-sky-400 bg-pink-400 text-white shadow-xs">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-pink-400 text-white shadow-xs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6" aria-hidden="true">
               <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
             </svg>
@@ -107,7 +108,7 @@ function Home() {
               to={item.to}
               className={({ isActive }) => `flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
                 isActive
-                  ? 'bg-linear-to-r from-pink-400 to-pink-500 font-semibold text-white shadow-xs'
+                  ? 'bg-pink-400 font-semibold text-white shadow-xs'
                   : 'text-slate-500 hover:bg-white/70 hover:text-pink-500'
               }`}
             >
@@ -129,8 +130,9 @@ function Home() {
         </nav>
       </aside>
 
-      <div className="min-w-0 flex-1">
-        <header className="flex items-center justify-between bg-white px-6 py-4 shadow-xs">
+      {/* ฝั่งขวา: ขยายเต็มพื้นที่ bg-white และไม่มี padding กั้น */}
+      <div className="min-w-0 flex-1 bg-white min-h-screen flex flex-col">
+        <header className="flex items-center justify-between bg-white px-8 py-4 border-b border-slate-100">
           <h1 className="text-xl font-bold text-slate-800">Smart Watch Dashboard</h1>
           <div className="flex items-center gap-4">
             <span className="text-sm font-medium text-slate-600">{user.name}</span>
@@ -143,7 +145,8 @@ function Home() {
           </div>
         </header>
 
-        <main className="p-6 text-slate-700">
+        {/* main: ลบ p-6 ออก เปลี่ยนเป็น p-8 เพื่อให้ระยะห่างสวยงามพอดีโดยไม่มีกรอบสีเทากั้น */}
+        <main className="flex-1 bg-white p-8">
           <Outlet context={{ user }} />
         </main>
       </div>

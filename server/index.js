@@ -134,20 +134,17 @@ app.get("/admin/users", verifyAdmin, async (req, res) => {
   }
 });
 
-// ✅ Admin Route: ดึงข้อมูลสถิติสำหรับหน้า Dashboard (นับเฉพาะผู้ใช้ที่ไม่ใช่ admin + แสดงครบ 7 วัน)
+// Admin Route: ดึงข้อมูลสถิติสำหรับหน้า Dashboard
 app.get("/admin/dashboard-stats", verifyAdmin, async (req, res) => {
   try {
-    // 1. จำนวนผู้ใช้ทั้งหมดที่ไม่ใช่ admin
     const [totalRows] = await db.execute(
       "SELECT COUNT(id) AS total FROM users WHERE role != 'admin' OR role IS NULL"
     );
 
-    // 2. จำนวนผู้สมัครใหม่สัปดาห์นี้
     const [growthRows] = await db.execute(
       "SELECT COUNT(id) AS total FROM users WHERE (role != 'admin' OR role IS NULL) AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
     );
 
-    // 3. ดึงสถิติรายวัน 7 วันล่าสุดที่มีการสมัคร
     const [chartRows] = await db.execute(`
       SELECT 
         DATE(created_at) AS date_val,
@@ -158,7 +155,6 @@ app.get("/admin/dashboard-stats", verifyAdmin, async (req, res) => {
       GROUP BY DATE(created_at)
     `);
 
-    // สร้าง Map เก็บข้อมูลที่มีใน DB โดยแปลงคีย์เป็น YYYY-MM-DD (ตามเวลาท้องถิ่น)
     const dbDataMap = {};
     chartRows.forEach((row) => {
       const d = new Date(row.date_val);
@@ -174,7 +170,6 @@ app.get("/admin/dashboard-stats", verifyAdmin, async (req, res) => {
       Wed: "พ.", Thu: "พฤ.", Fri: "ศ.", Sat: "ส."
     };
 
-    // 4. วน Loop ย้อนหลัง 7 วันเพื่อให้ได้ชื่อวันครบถ้วน (วันไหนไม่มีข้อมูลให้ค่าเป็น 0)
     const weeklyData = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -200,6 +195,75 @@ app.get("/admin/dashboard-stats", verifyAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ==========================================
+// 👨‍👩‍👧‍👦 Family Members Routes (แยกเฉพาะ User)
+// ==========================================
+
+// 1. ดึงสมาชิกเฉพาะของผู้ใช้งานที่ล็อกอินอยู่
+app.get("/api/family-members", verifyUser, async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const [rows] = await db.execute(
+      "SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected FROM family_members WHERE user_id = ? ORDER BY id DESC",
+      [currentUserId]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error("Error fetching family members:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// 2. เพิ่มสมาชิกใหม่ ผูกกับ user_id
+app.post("/api/family-members", verifyUser, async (req, res) => {
+  const { name, relation } = req.body ?? {};
+  if (!name || !relation) {
+    return res.status(400).json({ error: "Name and relation are required" });
+  }
+
+  try {
+    const currentUserId = req.user.id;
+    const avatarText = name.charAt(0);
+
+    const [result] = await db.execute(
+      "INSERT INTO family_members (user_id, name, relation, avatar_text) VALUES (?, ?, ?, ?)",
+      [currentUserId, name, relation, avatarText]
+    );
+
+    const [newMember] = await db.execute(
+      "SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected FROM family_members WHERE id = ? AND user_id = ?",
+      [result.insertId, currentUserId]
+    );
+
+    return res.status(201).json(newMember[0]);
+  } catch (err) {
+    console.error("Error creating family member:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// 3. ลบสมาชิกครอบครัว
+app.delete("/api/family-members/:id", verifyUser, async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const { id } = req.params;
+
+    const [result] = await db.execute(
+      "DELETE FROM family_members WHERE id = ? AND user_id = ?",
+      [id, currentUserId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Member not found or unauthorized" });
+    }
+
+    return res.json({ message: "Member deleted successfully", id: Number(id) });
+  } catch (err) {
+    console.error("Error deleting family member:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
