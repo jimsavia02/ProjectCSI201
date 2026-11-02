@@ -1,6 +1,12 @@
+-- schema.sql : สำหรับขึ้นระบบใหม่/สร้างฐานข้อมูลเปล่าตั้งแต่ต้น
+
+CREATE DATABASE IF NOT EXISTS signup_login 
+  CHARACTER SET utf8mb4 
+  COLLATE utf8mb4_unicode_ci;
+
 USE signup_login;
 
--- 1. สร้างตาราง users (กรณีเครื่องที่ยังไม่มีเลย)
+-- 1. ตาราง users
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
@@ -8,25 +14,39 @@ CREATE TABLE IF NOT EXISTS users (
   password VARCHAR(255) NOT NULL,
   role VARCHAR(20) DEFAULT 'user',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. กรณีเครื่องที่มีตาราง users อยู่แล้วแต่ไม่มีคอลัมน์ role
--- (ถ้ารันแล้วขึ้น Warning ว่ามีคอลัมน์อยู่แล้ว สามารถข้ามได้เลยครับ)
-ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user';
-
--- 3. สร้างตาราง family_members
+-- 2. ตาราง family_members
 CREATE TABLE IF NOT EXISTS family_members (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   name VARCHAR(100) NOT NULL,
   relation VARCHAR(50) NOT NULL,
   avatar_text VARCHAR(10) DEFAULT NULL,
-  device VARCHAR(100) DEFAULT 'Garmin Smartwatch',
+  device VARCHAR(100) DEFAULT NULL, -- ปรับเป็น NULL เพื่อให้แสดง "ยังไม่ได้เชื่อมต่ออุปกรณ์" เมื่อยังไม่เชื่อมต่อ
   heart_rate VARCHAR(20) DEFAULT '-',
   steps VARCHAR(20) DEFAULT '-',
   sleep VARCHAR(20) DEFAULT '-',
-  status VARCHAR(20) DEFAULT 'ปกติ',
+  status VARCHAR(20) DEFAULT 'ไม่มีข้อมูล',
   is_connected TINYINT(1) DEFAULT 0,
+  garmin_user_id VARCHAR(255) DEFAULT NULL,
+  garmin_access_token TEXT DEFAULT NULL,
+  garmin_refresh_token TEXT DEFAULT NULL,
+  garmin_token_expires_at BIGINT DEFAULT NULL,
+  last_synced_at DATETIME DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 3. ตาราง health_history
+CREATE TABLE IF NOT EXISTS health_history (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  member_id INT NOT NULL,
+  record_date DATE NOT NULL,
+  sleep_hours DECIMAL(3,1) DEFAULT 0.0,
+  avg_hr INT DEFAULT 75,
+  steps INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (member_id) REFERENCES family_members(id) ON DELETE CASCADE,
+  UNIQUE KEY unique_member_date (member_id, record_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
