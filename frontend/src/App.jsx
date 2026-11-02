@@ -7,8 +7,8 @@ import Data from './pages/data.jsx'
 import Report from './pages/report.jsx'
 import Party from './pages/party.jsx'
 import Setting from './pages/setting.jsx'
+import Appointments from './pages/Appointments.jsx' // 1. เพิ่ม Import ตรงนี้
 
-// Import ฝั่ง Admin (แก้ไข path ให้ถูกต้องตรงกับชื่อไฟล์จริง)
 import AdminHome from './pages/adminHome.jsx'
 import AdminDashboard from './pages/AdminDashboard.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
@@ -32,6 +32,9 @@ function App() {
           <Route path="report" element={<Report />} />
           <Route path="party" element={<Party />} />
           <Route path="setting" element={<Setting />} />
+          
+          {/* 2. วางไว้ตรงนี้ (พาธจะเป็น /appointments) */}
+          <Route path="appointments" element={<Appointments />} />
         </Route>
 
         {/* === ฝั่ง ADMIN === */}
