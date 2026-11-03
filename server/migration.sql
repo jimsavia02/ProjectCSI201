@@ -71,3 +71,18 @@ CREATE TABLE IF NOT EXISTS appointments (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (member_id) REFERENCES family_members(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===================================================
+-- 7. สร้างตาราง health_readings (ข้อมูลสุขภาพรายครั้งจาก Smart Watch เก็บย้อนหลัง 7 วัน)
+-- ===================================================
+CREATE TABLE IF NOT EXISTS health_readings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  member_id INT NOT NULL,
+  type VARCHAR(20) NOT NULL,           -- heart_rate | steps | sleep | stress
+  value DECIMAL(7,1) DEFAULT NULL,     -- NULL = ไม่มีข้อมูล (อุปกรณ์ไม่ได้เชื่อมต่อ)
+  source VARCHAR(100) DEFAULT NULL,    -- ชื่ออุปกรณ์ที่ส่งข้อมูลมา
+  recorded_at DATETIME NOT NULL,       -- เวลาที่นาฬิกาวัดค่า
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (member_id) REFERENCES family_members(id) ON DELETE CASCADE,
+  INDEX idx_member_type_time (member_id, type, recorded_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

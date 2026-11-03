@@ -8,6 +8,7 @@ import session from "express-session";
 import crypto from "crypto";
 import axios from "axios";
 import "dotenv/config";
+import { READING_TYPES, purgeOldReadings, syncMockReadings } from "./mockHealth.js";
 
 // ------------------------------------------
 // 1. Environmental Variables Configuration
@@ -393,7 +394,7 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
 
   try {
     const [rows] = await db.execute(
-      "SELECT id, name, steps, sleep FROM family_members WHERE id = ? AND user_id = ?",
+      "SELECT id, name, device FROM family_members WHERE id = ? AND user_id = ?",
       [memberId, currentUserId]
     );
 
@@ -402,18 +403,16 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
       return res.status(404).json({ error: "ไม่พบสมาชิก" });
     }
 
-    const body = req.body || {};
-    const randomHr = Math.floor(Math.random() * (110 - 60 + 1)) + 60;
-    const heartRate = body.heart_rate || `${randomHr} bpm`;
+    // สร้างค่าใหม่ 3-4 ค่าลง health_readings แล้วใช้ค่าล่าสุดเป็นสรุปของสมาชิก
+    const latest = await syncMockReadings(db, memberId, member.device || "Smart Watch");
+    const randomHr = latest.heart_rate;
+    const newStepsNum = latest.steps ?? 0;
+    const sleepHours = latest.sleep ?? 7.5;
 
-    let currentStepsNum = 3500;
-    if (member.steps && member.steps !== '-' && member.steps !== '0') {
-      currentStepsNum = Number(String(member.steps).replace(/,/g, "")) || 3500;
-    }
-    const addedSteps = Math.floor(Math.random() * 20) + 5;
-    const newStepsNum = currentStepsNum + addedSteps;
+    const body = req.body || {};
+    const heartRate = body.heart_rate || `${randomHr} bpm`;
     const steps = body.steps || newStepsNum.toLocaleString("en-US");
-    const sleep = body.sleep || (member.sleep && member.sleep !== '-' ? member.sleep : "7.5 ชม.");
+    const sleep = body.sleep || `${sleepHours} ชม.`;
 
     let status = "ปกติ";
     if (randomHr > 100 || randomHr < 50) status = "อันตราย";
@@ -434,6 +433,60 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
   } catch (err) {
     console.error("Mock Sync Error:", err);
     return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ------------------------------------------
+// 7.1 ข้อมูลสุขภาพรายครั้ง (หน้า "ข้อมูลสุขภาพ")
+// ------------------------------------------
+
+// ดึงประวัติข้อมูลสุขภาพของสมาชิก แยกตามแท็บ (type) พร้อมแบ่งหน้า
+// เช่น /api/family-members/3/readings?type=heart_rate&page=1&limit=8
+app.get("/api/family-members/:memberId/readings", verifyUser, async (req, res) => {
+  const { memberId } = req.params;
+  const currentUserId = req.user.id;
+  const type = req.query.type || "heart_rate";
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 8));
+
+  if (!READING_TYPES.includes(type)) {
+    return res.status(400).json({ error: "ประเภทข้อมูลไม่ถูกต้อง" });
+  }
+
+  try {
+    const [members] = await db.execute(
+      "SELECT id, name, relation, device, last_synced_at FROM family_members WHERE id = ? AND user_id = ?",
+      [memberId, currentUserId]
+    );
+    const member = members[0];
+    if (!member) {
+      return res.status(404).json({ error: "ไม่พบสมาชิก" });
+    }
+
+    await purgeOldReadings(db);
+
+    const [[{ total }]] = await db.execute(
+      "SELECT COUNT(*) AS total FROM health_readings WHERE member_id = ? AND type = ?",
+      [memberId, type]
+    );
+    // LIMIT/OFFSET ใช้ db.query เพราะ db.execute ไม่รองรับตัวเลขใน LIMIT (ตรวจค่าเป็นตัวเลขแล้วด้านบน)
+    const [items] = await db.query(
+      `SELECT id, value, source, recorded_at FROM health_readings
+       WHERE member_id = ? AND type = ?
+       ORDER BY recorded_at DESC LIMIT ? OFFSET ?`,
+      [memberId, type, limit, (page - 1) * limit]
+    );
+
+    return res.json({
+      member,
+      items: items.map((r) => ({ ...r, value: r.value === null ? null : Number(r.value) })),
+      total,
+      page,
+      limit,
+    });
+  } catch (err) {
+    console.error("Fetch readings error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลสุขภาพได้" });
   }
 });
 

@@ -20,3 +20,13 @@ cd frontend
 npm install
 npm run dev
 เปิด http://localhost:5173/register
+
+ในหน้าข้อมูลสุขภาพจำลอง ตอนนี้ยังสุ่มค่าขึ้นมาอยู่ถ้าปิดเชิฟเวอร์ข้อมูลจะไม่ตรงกับวันที่ให้พิม :
+
+cd server
+npm run seed:health
+
+เอาไว้เผื่อให้ลบข้อมูลเดิมแล้วสร้างใหม่ให้เป็นปัจจุบัน
+
+cd server
+npm run seed:health -- --reset

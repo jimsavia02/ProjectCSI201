@@ -160,8 +160,8 @@ function AdminHome() {
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-slate-700">
-              {adminUser.name} <span className="text-xs text-slate-400">(Admin)</span>
+            <span className="text-lg font-semibold text-slate-800">
+              {adminUser.name} <span className="text-sm font-medium text-slate-400">(Admin)</span>
             </span>
             <button
               onClick={handleLogout}

@@ -15,7 +15,7 @@ function Home() {
     },
     {
       to: '/data',
-      label: 'ข้อมูล',
+      label: 'ข้อมูลสุขภาพ',
       icon: <path d="M4 5h16M4 12h16M4 19h16M7 5v.01M7 12v.01M7 19v.01" />,
     },
     {
@@ -135,7 +135,7 @@ function Home() {
         <header className="flex items-center justify-between bg-white px-8 py-4 border-b border-slate-100">
           <h1 className="text-xl font-bold text-slate-800">Smart Watch Dashboard</h1>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-slate-600">{user.name}</span>
+            <span className="text-lg font-semibold text-slate-800">{user.name}</span>
             <button
               onClick={handleLogout}
               className="rounded-lg bg-pink-300 px-4 py-2 text-sm font-medium text-pink-950 hover:bg-pink-400 transition-colors cursor-pointer"
