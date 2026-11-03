@@ -1,8 +1,223 @@
-function Setting() {
+import { useEffect, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import api, { getErrorMessage } from '../api.js'
+
+// สวิตช์การแจ้งเตือน (ตอนนี้กดเปิด/ปิดได้อย่างเดียว ยังไม่ได้บันทึกและยังไม่ได้ส่งแจ้งเตือนจริง)
+const NOTIFICATION_OPTIONS = [
+  { key: 'app', label: 'แจ้งเตือนผ่านแอป', desc: 'รับการแจ้งเตือนทันที', defaultOn: true },
+  { key: 'sms', label: 'แจ้งเตือนผ่าน SMS', desc: 'เฉพาะเหตุฉุกเฉิน', defaultOn: true },
+  { key: 'email', label: 'อีเมลสรุปรายสัปดาห์', desc: 'สรุปสุขภาพสมาชิกทุกคน', defaultOn: false },
+  { key: 'share', label: 'แชร์ข้อมูลกับครอบครัว', desc: 'ให้สมาชิกที่เชิญดูข้อมูลได้', defaultOn: true },
+]
+
+// ตัวอักษร 2 ตัวแรกของชื่อ ไว้แสดงในรูปโปรไฟล์ (ข้ามสระบน/ล่างและวรรณยุกต์ เช่น "อนุทิน" -> "อน")
+const initialsOf = (name = '') =>
+  [...name.replace(/[ัิ-ฺ็-๎\s]/g, '')].slice(0, 2).join('')
+
+const inputClass =
+  'w-full rounded-[14px] border border-[#f1dce5] bg-[#fff5f8] px-4 py-3 text-[#3c3038] outline-none placeholder:text-[#b8a4ae] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]'
+
+function Toggle({ checked, onChange, label }) {
   return (
-    <section>
-      <h2 className="text-2xl font-bold text-slate-800">ตั้งค่า</h2>
-      <p className="mt-2 text-slate-500">จัดการการตั้งค่าบัญชีของคุณได้ที่นี่</p>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={onChange}
+      className={`relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors ${
+        checked ? 'bg-linear-to-r from-[#ff83ad] to-[#f34c8c]' : 'bg-[#ece3e7]'
+      }`}
+    >
+      <span
+        className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-5' : ''
+        }`}
+      />
+    </button>
+  )
+}
+
+function Setting() {
+  const { setUser, onLogout } = useOutletContext()
+  const [values, setValues] = useState({ name: '', email: '', phone: '', password: '' })
+  const [savedName, setSavedName] = useState('') // ชื่อ/อีเมลที่บันทึกแล้ว ใช้แสดงบนการ์ดโปรไฟล์
+  const [savedEmail, setSavedEmail] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState({ type: '', text: '' })
+  const [notifications, setNotifications] = useState(
+    Object.fromEntries(NOTIFICATION_OPTIONS.map((o) => [o.key, o.defaultOn]))
+  )
+
+  // โหลดข้อมูลบัญชีปัจจุบันมาใส่ในฟอร์ม
+  useEffect(() => {
+    api.get('/api/account')
+      .then((res) => {
+        const { name, email, phone } = res.data
+        setValues({ name, email, phone: phone || '', password: '' })
+        setSavedName(name)
+        setSavedEmail(email)
+      })
+      .catch((err) => setMessage({ type: 'error', text: getErrorMessage(err) }))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleChange = (e) => {
+    setValues({ ...values, [e.target.name]: e.target.value })
+  }
+
+  const handleSave = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setMessage({ type: '', text: '' })
+    try {
+      const res = await api.put('/api/account', values)
+      setSavedName(values.name.trim())
+      setSavedEmail(values.email.trim())
+      setValues({ ...values, password: '' })
+      setUser((u) => ({ ...u, name: values.name.trim() })) // อัปเดตชื่อบนแถบด้านบนทันที
+      setMessage({ type: 'success', text: res.data.message })
+    } catch (err) {
+      setMessage({ type: 'error', text: getErrorMessage(err) })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <p className="text-sm text-[#8e7c87]">กำลังโหลดข้อมูล...</p>
+  }
+
+  return (
+    <section className="text-[#3c3038]">
+      <h1 className="text-3xl font-semibold">ตั้งค่า</h1>
+      <p className="mt-1.5 text-[#8e7c87]">จัดการบัญชี การแจ้งเตือน และความเป็นส่วนตัว</p>
+
+      <div className="mt-7 grid gap-6 lg:grid-cols-2">
+        {/* การ์ดซ้าย: ข้อมูลบัญชี */}
+        <form onSubmit={handleSave} className="rounded-[22px] border border-[#f1dce5] bg-white p-6 md:p-7">
+          <h2 className="text-lg font-semibold">ข้อมูลบัญชี</h2>
+
+          <div className="mt-5 flex items-center gap-4">
+            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full bg-linear-to-br from-[#ff83ad] to-[#f34c8c] text-xl font-semibold text-white">
+              {initialsOf(savedName)}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-lg font-semibold">{savedName}</p>
+              <p className="truncate text-sm text-[#8e7c87]">{savedEmail}</p>
+            </div>
+          </div>
+
+          {message.text && (
+            <p
+              role={message.type === 'error' ? 'alert' : 'status'}
+              className={`mt-5 rounded-xl px-4 py-3 text-sm ${
+                message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {message.text}
+            </p>
+          )}
+
+          <div className="mt-5 space-y-4">
+            <div>
+              <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+                ชื่อ - นามสกุล
+              </label>
+              <input id="name" name="name" required maxLength={100} value={values.name} onChange={handleChange} className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+                อีเมล
+              </label>
+              <input id="email" name="email" type="email" required value={values.email} onChange={handleChange} className={inputClass} />
+            </div>
+            <div>
+              <label htmlFor="phone" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+                เบอร์โทรศัพท์
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                maxLength={20}
+                placeholder="08X-XXX-XXXX"
+                value={values.phone}
+                onChange={handleChange}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+                รหัสผ่าน
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                placeholder="เว้นว่างไว้ถ้าไม่ต้องการเปลี่ยน"
+                value={values.password}
+                onChange={handleChange}
+                className={inputClass}
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="mt-7 cursor-pointer rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] px-10 py-3 font-medium text-white shadow-md shadow-pink-200 transition hover:brightness-95 disabled:opacity-60"
+          >
+            {saving ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
+          </button>
+        </form>
+
+        {/* การ์ดขวา: การแจ้งเตือน & ความเป็นส่วนตัว */}
+        <div className="flex flex-col rounded-[22px] border border-[#f1dce5] bg-white p-6 md:p-7">
+          <h2 className="text-lg font-semibold">การแจ้งเตือน &amp; ความเป็นส่วนตัว</h2>
+
+          <ul className="mt-3">
+            {NOTIFICATION_OPTIONS.map((option) => (
+              <li key={option.key} className="flex items-center justify-between gap-4 border-b border-[#f6e6ed] py-4">
+                <div>
+                  <p className="font-semibold">{option.label}</p>
+                  <p className="text-xs text-[#9d8994]">{option.desc}</p>
+                </div>
+                <Toggle
+                  label={option.label}
+                  checked={notifications[option.key]}
+                  onChange={() => setNotifications({ ...notifications, [option.key]: !notifications[option.key] })}
+                />
+              </li>
+            ))}
+          </ul>
+
+          {/* ภาษาและธีม: ตอนนี้มีให้เลือกอย่างเดียว จึงแสดงเป็นข้อความ */}
+          <dl className="mt-3">
+            <div className="flex items-center justify-between border-b border-[#f6e6ed] py-4">
+              <dt className="font-semibold">ภาษา</dt>
+              <dd className="text-[#f05289]">ไทย</dd>
+            </div>
+            <div className="flex items-center justify-between py-4">
+              <dt className="font-semibold">ธีม</dt>
+              <dd className="text-[#f05289]">ชมพู</dd>
+            </div>
+          </dl>
+
+          <div className="mt-auto pt-6">
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-full cursor-pointer rounded-[15px] border-2 border-[#f05289] py-3 font-semibold text-[#f05289] transition hover:bg-[#fff5f8]"
+            >
+              ออกจากระบบ
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
   )
 }

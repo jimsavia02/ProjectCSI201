@@ -86,3 +86,9 @@ CREATE TABLE IF NOT EXISTS health_readings (
   FOREIGN KEY (member_id) REFERENCES family_members(id) ON DELETE CASCADE,
   INDEX idx_member_type_time (member_id, type, recorded_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ===================================================
+-- 8. เพิ่มคอลัมน์เบอร์โทรศัพท์ในตาราง users (ใช้ในหน้าสมัครสมาชิกและหน้าตั้งค่า)
+-- ===================================================
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20) DEFAULT NULL AFTER email;

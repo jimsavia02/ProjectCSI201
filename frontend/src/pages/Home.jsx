@@ -147,7 +147,7 @@ function Home() {
 
         {/* main: ลบ p-6 ออก เปลี่ยนเป็น p-8 เพื่อให้ระยะห่างสวยงามพอดีโดยไม่มีกรอบสีเทากั้น */}
         <main className="flex-1 bg-white p-8">
-          <Outlet context={{ user }} />
+          <Outlet context={{ user, setUser, onLogout: handleLogout }} />
         </main>
       </div>
     </div>

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import api, { getErrorMessage } from '../api.js'
 
 function Register() {
-  const [values, setValues] = useState({ name: '', email: '', password: '', confirmPassword: '' })
+  const [values, setValues] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
@@ -21,8 +21,8 @@ function Register() {
     }
     setLoading(true)
     try {
-      const { name, email, password } = values
-      await api.post('/register', { name, email, password })
+      const { name, email, phone, password } = values
+      await api.post('/register', { name, email, phone, password })
       // สมัครสำเร็จ: ไปหน้ายินดีต้อนรับ พร้อมส่งชื่อไปแสดง
       navigate('/welcome', { state: { name } })
     } catch (err) {
@@ -146,7 +146,11 @@ function Register() {
                   id="phone"
                   name="phone"
                   type="tel"
+                  autoComplete="tel"
                   placeholder="08X-XXX-XXXX"
+                  maxLength={20}
+                  value={values.phone}
+                  onChange={handleChange}
                   className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
                 />
               </div>

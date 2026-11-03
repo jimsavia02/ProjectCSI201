@@ -92,7 +92,7 @@ const verifyUser = (req, res, next) => {
 // 4. Auth & User Routes
 // ------------------------------------------
 app.post("/register", async (req, res) => {
-  const { name, email, password } = req.body ?? {};
+  const { name, email, phone, password } = req.body ?? {};
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Name, email and password are required" });
   }
@@ -101,9 +101,10 @@ app.post("/register", async (req, res) => {
   }
   try {
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
+    // เบอร์โทรไม่บังคับกรอก ถ้าเว้นว่างจะเก็บเป็น NULL
     await db.execute(
-      "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-      [name, email, hash]
+      "INSERT INTO users (name, email, phone, password) VALUES (?, ?, ?, ?)",
+      [name, email, phone?.trim() || null, hash]
     );
     return res.status(201).json({ message: "Registered successfully" });
   } catch (err) {
@@ -156,6 +157,63 @@ app.get("/me", verifyUser, (req, res) => {
 app.post("/logout", (req, res) => {
   res.clearCookie("token", { httpOnly: true, sameSite: "lax" });
   return res.json({ message: "Logged out" });
+});
+
+// ดึงข้อมูลบัญชีของผู้ใช้ที่ล็อกอินอยู่ (หน้าตั้งค่า)
+app.get("/api/account", verifyUser, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT id, name, email, phone, role FROM users WHERE id = ?",
+      [req.user.id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: "ไม่พบบัญชีผู้ใช้" });
+    }
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("Fetch account error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// แก้ไขข้อมูลบัญชี (หน้าตั้งค่า): ชื่อ อีเมล เบอร์โทร และรหัสผ่าน
+// ถ้าช่องรหัสผ่านเว้นว่าง = ไม่เปลี่ยนรหัสผ่าน
+app.put("/api/account", verifyUser, async (req, res) => {
+  const { name, email, phone, password } = req.body ?? {};
+  if (!name?.trim() || !email?.trim()) {
+    return res.status(400).json({ error: "กรุณากรอกชื่อและอีเมล" });
+  }
+  if (password && password.length < 8) {
+    return res.status(400).json({ error: "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร" });
+  }
+
+  try {
+    await db.execute(
+      "UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?",
+      [name.trim(), email.trim(), phone?.trim() || null, req.user.id]
+    );
+    if (password) {
+      const hash = await bcrypt.hash(password, SALT_ROUNDS);
+      await db.execute("UPDATE users SET password = ? WHERE id = ?", [hash, req.user.id]);
+    }
+
+    // ออก token ใหม่ เพื่อให้ชื่อที่แสดงบนแถบด้านบนเป็นชื่อใหม่ (role อ่านจากฐานข้อมูลล่าสุด)
+    const [[{ role }]] = await db.execute("SELECT role FROM users WHERE id = ?", [req.user.id]);
+    const token = jwt.sign(
+      { id: req.user.id, name: name.trim(), role },
+      JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+    res.cookie("token", token, COOKIE_OPTIONS);
+
+    return res.json({ message: "บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว" });
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ error: "อีเมลนี้ถูกใช้งานแล้ว" });
+    }
+    console.error("Update account error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
 });
 
 // ------------------------------------------
