@@ -23,7 +23,8 @@ function Register() {
     try {
       const { name, email, password } = values
       await api.post('/register', { name, email, password })
-      navigate('/login')
+      // สมัครสำเร็จ: ไปหน้ายินดีต้อนรับ พร้อมส่งชื่อไปแสดง
+      navigate('/welcome', { state: { name } })
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {
@@ -49,20 +50,11 @@ function Register() {
           </div>
 
           <nav className="space-y-3">
-            <a href="#" className="block rounded-2xl px-4 py-3 text-[#917d88]">
-              ⌂ หน้าหลัก
-            </a>
             <a
               href="#"
               className="block rounded-2xl border border-[#ff9cba] bg-white px-4 py-3 font-medium text-[#f05289]"
             >
               ♡ สมัครสมาชิก
-            </a>
-            <a href="#" className="block rounded-2xl px-4 py-3 text-[#917d88]">
-              ♧ สมาชิก
-            </a>
-            <a href="#" className="block rounded-2xl px-4 py-3 text-[#917d88]">
-              ⚙ ตั้งค่า
             </a>
           </nav>
         </aside>
@@ -176,7 +168,8 @@ function Register() {
                   className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
                 />
               </div>
-              <div className="md:col-span-2">
+              {/* ยืนยันรหัสผ่าน: กว้างเท่าช่องรหัสผ่าน และอยู่คอลัมน์ขวาใต้ช่องรหัสผ่าน */}
+              <div className="md:col-start-2">
                 <label
                   htmlFor="confirmPassword"
                   className="mb-2 block text-[#786671]"

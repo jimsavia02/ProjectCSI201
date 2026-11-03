@@ -10,6 +10,7 @@ function Party() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newRelation, setNewRelation] = useState('คู่สมรส');
+  const [customRelation, setCustomRelation] = useState('');
   const [newDevice, setNewDevice] = useState('Smart Watch');
 
   // ฟังก์ชันดึงข้อมูลสมาชิกทั้งหมด
@@ -31,18 +32,21 @@ function Party() {
   // ฟังก์ชันเพิ่มสมาชิกใหม่
   const handleAddMember = async (e) => {
     e.preventDefault();
-    if (!newName || !newRelation) return;
+    // ถ้าเลือก "อื่นๆ" ให้ใช้ข้อความที่ผู้ใช้กรอกเองแทน
+    const relation = newRelation === 'อื่นๆ' ? customRelation.trim() : newRelation;
+    if (!newName || !relation) return;
 
     try {
       await api.post('/api/family-members', {
         name: newName,
-        relation: newRelation,
+        relation,
         device: newDevice
       });
 
       setIsAddModalOpen(false);
       setNewName('');
       setNewRelation('คู่สมรส');
+      setCustomRelation('');
       setNewDevice('Smart Watch');
 
       fetchMembers();
@@ -235,6 +239,18 @@ function Party() {
                   <option value="บุตร">บุตร</option>
                   <option value="อื่นๆ">อื่นๆ</option>
                 </select>
+                {newRelation === 'อื่นๆ' && (
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    maxLength={50}
+                    placeholder="ระบุความสัมพันธ์ เช่น พี่ชาย, หลาน"
+                    value={customRelation}
+                    onChange={(e) => setCustomRelation(e.target.value)}
+                    className="mt-2 w-full px-4 py-2.5 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-pink-300"
+                  />
+                )}
               </div>
 
               <div>

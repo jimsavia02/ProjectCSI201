@@ -160,13 +160,16 @@ app.post("/logout", (req, res) => {
 // ------------------------------------------
 // 5. Family Members & Management Routes
 // ------------------------------------------
+// ดึงรายชื่อสมาชิกครอบครัวทั้งหมดของผู้ใช้ที่ล็อกอินอยู่ (ใช้แสดงในหน้าสมาชิกครอบครัว)
+// เรียงจากสมาชิกที่เพิ่มล่าสุดขึ้นก่อน
 app.get("/api/family-members", verifyUser, async (req, res) => {
   try {
     const currentUserId = req.user.id;
+    // เลือกเฉพาะคอลัมน์ที่มีอยู่จริงในตาราง family_members
+    // (ข้อมูลนัดหมายแพทย์แยกไปอยู่ที่ตาราง appointments แล้ว)
     const [rows] = await db.execute(
       `SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected,
-              emergency_contact_name, emergency_contact_phone, 
-              next_appointment_date, next_appointment_doctor, next_appointment_note 
+              emergency_contact_name, emergency_contact_phone
        FROM family_members WHERE user_id = ? ORDER BY id DESC`,
       [currentUserId]
     );
