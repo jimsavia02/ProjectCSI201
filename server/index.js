@@ -88,6 +88,13 @@ const verifyUser = (req, res, next) => {
   }
 };
 
+// เบอร์โทร: ตัวเลขล้วน ไม่เกิน 10 หลัก (ว่างได้ = ไม่กรอก)
+const PHONE_ERROR = "เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น และไม่เกิน 10 หลัก";
+const isValidPhone = (phone) => {
+  if (phone == null || phone === "") return true;
+  return typeof phone === "string" && /^\d{1,10}$/.test(phone.trim());
+};
+
 // ------------------------------------------
 // 4. Auth & User Routes
 // ------------------------------------------
@@ -98,6 +105,9 @@ app.post("/register", async (req, res) => {
   }
   if (password.length < 8) {
     return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+  if (!isValidPhone(phone)) {
+    return res.status(400).json({ error: PHONE_ERROR });
   }
   try {
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
@@ -183,6 +193,9 @@ app.put("/api/account", verifyUser, async (req, res) => {
   if (!name?.trim() || !email?.trim()) {
     return res.status(400).json({ error: "กรุณากรอกชื่อและอีเมล" });
   }
+  if (!isValidPhone(phone)) {
+    return res.status(400).json({ error: PHONE_ERROR });
+  }
 
   try {
     await db.execute(
@@ -250,7 +263,7 @@ app.get("/api/family-members", verifyUser, async (req, res) => {
     // (ข้อมูลนัดหมายแพทย์แยกไปอยู่ที่ตาราง appointments แล้ว)
     const [rows] = await db.execute(
       `SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected,
-              emergency_contact_name, emergency_contact_phone
+              last_synced_at, emergency_contact_name, emergency_contact_phone
        FROM family_members WHERE user_id = ? ORDER BY id DESC`,
       [currentUserId]
     );
@@ -428,6 +441,10 @@ app.put("/api/family-members/:memberId/emergency-contact", verifyUser, async (re
   const { memberId } = req.params;
   const { emergency_contact_name, emergency_contact_phone } = req.body;
   const currentUserId = req.user.id;
+
+  if (!emergency_contact_phone?.trim() || !isValidPhone(emergency_contact_phone)) {
+    return res.status(400).json({ error: PHONE_ERROR });
+  }
 
   try {
     const [result] = await db.execute(

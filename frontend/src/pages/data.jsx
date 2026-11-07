@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react'
 import api, { getErrorMessage } from '../api.js'
 
@@ -89,19 +89,25 @@ function Data() {
   const [error, setError] = useState('')
   const [reloadKey, setReloadKey] = useState(0) // เพิ่มค่าเพื่อสั่งโหลดข้อมูลใหม่หลังซิงค์
 
-  // โหลดรายชื่อสมาชิกสำหรับ dropdown แล้วเลือกคนแรกไว้ก่อน
+  // สมาชิกที่ส่งมาจากหน้าอื่น (เช่น popup รายละเอียดในหน้าสมาชิก) อ่านครั้งเดียวตอนเปิดหน้า
+  const location = useLocation()
+  const [preferredId] = useState(() => location.state?.memberId ?? null)
+
+  // โหลดรายชื่อสมาชิกสำหรับ dropdown แล้วเลือกคนที่ส่งมา (ถ้าไม่มีเลือกคนแรก)
   useEffect(() => {
     api.get('/api/family-members')
       .then((res) => {
         setMembers(res.data)
-        if (res.data.length > 0) setMemberId(res.data[0].id)
-        else setLoading(false)
+        if (res.data.length > 0) {
+          const preferred = res.data.find((m) => m.id === preferredId)
+          setMemberId(preferred ? preferred.id : res.data[0].id)
+        } else setLoading(false)
       })
       .catch((err) => {
         setError(getErrorMessage(err))
         setLoading(false)
       })
-  }, [])
+  }, [preferredId])
 
   // โหลดข้อมูลสุขภาพทุกครั้งที่เปลี่ยนสมาชิก / แท็บ / หน้า หรือหลังกดซิงค์
   useEffect(() => {

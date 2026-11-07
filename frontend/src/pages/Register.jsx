@@ -12,6 +12,9 @@ function Register() {
     setValues({ ...values, [e.target.name]: e.target.value })
   }
 
+  // เบอร์โทรมีตัวอักษรอื่นนอกจากตัวเลข -> แสดงคำเตือนและกดสมัครไม่ได้
+  const phoneInvalid = /\D/.test(values.phone)
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
@@ -146,13 +149,25 @@ function Register() {
                   id="phone"
                   name="phone"
                   type="tel"
+                  inputMode="numeric"
                   autoComplete="tel"
-                  placeholder="08X-XXX-XXXX"
-                  maxLength={20}
+                  placeholder="0812345678"
+                  maxLength={10}
                   value={values.phone}
                   onChange={handleChange}
-                  className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
+                  aria-invalid={phoneInvalid}
+                  aria-describedby={phoneInvalid ? 'phone-warning' : undefined}
+                  className={`w-full rounded-[14px] border px-4 py-4 outline-none placeholder:text-[#a9939e] focus:ring-2 ${
+                    phoneInvalid
+                      ? 'border-red-400 focus:border-red-400 focus:ring-red-100'
+                      : 'border-[#e9d7e0] focus:border-[#f66c9c] focus:ring-[#ffe3ed]'
+                  }`}
                 />
+                {phoneInvalid && (
+                  <p id="phone-warning" className="mt-1.5 text-sm text-red-600">
+                    ควรใส่เฉพาะตัวเลข
+                  </p>
+                )}
               </div>
 
               <div>
@@ -206,7 +221,7 @@ function Register() {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || phoneInvalid}
                 className="rounded-[15px] bg-gradient-to-r from-[#ff83ad] to-[#f34c8c] px-10 py-3 text-lg font-medium text-white transition hover:brightness-95 disabled:opacity-60"
               >
                 {loading ? 'กำลังสร้างบัญชี...' : 'ถัดไป'}

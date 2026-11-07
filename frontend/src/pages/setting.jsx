@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { Eye, EyeOff, KeyRound } from 'lucide-react'
+import { KeyRound } from 'lucide-react'
 import api, { getErrorMessage } from '../api.js'
 
 // สวิตช์การแจ้งเตือน (ตอนนี้กดเปิด/ปิดได้อย่างเดียว ยังไม่ได้บันทึกและยังไม่ได้ส่งแจ้งเตือนจริง)
@@ -41,9 +41,8 @@ function Toggle({ checked, onChange, label }) {
 
 const EMPTY_PASSWORDS = { currentPassword: '', newPassword: '', confirmPassword: '' }
 
-// ช่องรหัสผ่านพร้อมปุ่มรูปตา กดเพื่อแสดง/ซ่อนรหัสผ่าน
+// ช่องรหัสผ่าน พร้อมข้อความช่วยเหลือใต้ช่อง
 function PasswordInput({ id, label, hint, hintTone = 'muted', ...props }) {
-  const [visible, setVisible] = useState(false)
   const hintColor = { muted: 'text-[#9d8994]', ok: 'text-emerald-600', error: 'text-red-600' }[hintTone]
 
   return (
@@ -51,24 +50,14 @@ function PasswordInput({ id, label, hint, hintTone = 'muted', ...props }) {
       <label htmlFor={id} className="mb-1.5 block text-sm font-semibold text-[#786671]">
         {label}
       </label>
-      <div className="relative">
-        <input
-          id={id}
-          name={id}
-          type={visible ? 'text' : 'password'}
-          aria-describedby={hint ? `${id}-hint` : undefined}
-          className={`${inputClass} pr-12`}
-          {...props}
-        />
-        <button
-          type="button"
-          onClick={() => setVisible((v) => !v)}
-          aria-label={visible ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
-          className="absolute inset-y-0 right-0 grid w-12 cursor-pointer place-items-center text-[#b8a4ae] hover:text-[#f05289]"
-        >
-          {visible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-        </button>
-      </div>
+      <input
+        id={id}
+        name={id}
+        type="password"
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        className={inputClass}
+        {...props}
+      />
       {hint && (
         <p id={`${id}-hint`} className={`mt-1.5 text-xs ${hintColor}`}>
           {hint}
@@ -239,6 +228,9 @@ function Setting() {
     setValues({ ...values, [e.target.name]: e.target.value })
   }
 
+  // เบอร์โทรมีตัวอักษรอื่นนอกจากตัวเลข -> แสดงคำเตือนและกดบันทึกไม่ได้
+  const phoneInvalid = /\D/.test(values.phone)
+
   const handleSave = async (e) => {
     e.preventDefault()
     setSaving(true)
@@ -312,19 +304,27 @@ function Setting() {
                 id="phone"
                 name="phone"
                 type="tel"
-                maxLength={20}
-                placeholder="08X-XXX-XXXX"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="081-234-5678 (ใส่เฉพาะตัวเลข)"
                 value={values.phone}
                 onChange={handleChange}
-                className={inputClass}
+                aria-invalid={phoneInvalid}
+                aria-describedby={phoneInvalid ? 'phone-warning' : undefined}
+                className={`${inputClass} ${phoneInvalid ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : ''}`}
               />
+              {phoneInvalid && (
+                <p id="phone-warning" className="mt-1.5 text-sm text-red-600">
+                  ควรใส่เฉพาะตัวเลข
+                </p>
+              )}
             </div>
           </div>
 
           <button
             type="submit"
-            disabled={saving}
-            className="mt-7 cursor-pointer rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] px-10 py-3 font-medium text-white shadow-md shadow-pink-200 transition hover:brightness-95 disabled:opacity-60"
+            disabled={saving || phoneInvalid}
+            className="mt-7 cursor-pointer disabled:cursor-not-allowed rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] px-10 py-3 font-medium text-white shadow-md shadow-pink-200 transition hover:brightness-95 disabled:opacity-60"
           >
             {saving ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
           </button>

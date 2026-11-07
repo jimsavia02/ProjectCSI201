@@ -19,6 +19,8 @@ function Dashboard() {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [emergencyName, setEmergencyName] = useState('');
   const [emergencyPhone, setEmergencyPhone] = useState('');
+  // เบอร์ฉุกเฉินมีตัวอักษรอื่นนอกจากตัวเลข -> แสดงคำเตือนและกดบันทึกไม่ได้
+  const emergencyPhoneInvalid = /\D/.test(emergencyPhone);
 
   const fetchMembers = async (isInitial = false) => {
     try {
@@ -367,12 +369,28 @@ function Dashboard() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">เบอร์โทรศัพท์</label>
-                <input type="tel" required placeholder="เช่น 081-234-5678" value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  required
+                  placeholder="เช่น 081-234-5678"
+                  value={emergencyPhone}
+                  onChange={(e) => setEmergencyPhone(e.target.value)}
+                  aria-invalid={emergencyPhoneInvalid}
+                  aria-describedby={emergencyPhoneInvalid ? 'emergency-phone-warning' : undefined}
+                  className={`w-full px-3.5 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 ${
+                    emergencyPhoneInvalid ? 'border-red-400 focus:ring-red-100' : 'border-slate-200 focus:ring-pink-300'
+                  }`}
+                />
+                {emergencyPhoneInvalid && (
+                  <p id="emergency-phone-warning" className="mt-1 text-xs text-red-600">ควรใส่เฉพาะตัวเลข</p>
+                )}
               </div>
 
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setIsEmergencyModalOpen(false)} className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-full text-xs font-semibold hover:bg-slate-50 cursor-pointer">ยกเลิก</button>
-                <button type="submit" className="flex-1 py-2.5 bg-pink-400 hover:bg-pink-500 text-white rounded-full text-xs font-semibold shadow-md shadow-pink-200 cursor-pointer">บันทึก</button>
+                <button type="submit" disabled={emergencyPhoneInvalid} className="flex-1 py-2.5 bg-pink-400 hover:bg-pink-500 text-white rounded-full text-xs font-semibold shadow-md shadow-pink-200 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-pink-400">บันทึก</button>
               </div>
             </form>
           </div>

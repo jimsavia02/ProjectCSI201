@@ -1,6 +1,222 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Watch, User, Activity, Moon, Heart, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Plus, Trash2, Watch, User, Activity, Moon, Heart, ExternalLink, X, CalendarHeart, Phone, PhoneCall, Clock,
+  ChevronRight, Wifi, WifiOff,
+} from 'lucide-react';
 import api from '../api.js';
+
+const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+// วันนี้ในรูปแบบ "YYYY-MM-DD" ตามเวลาเครื่อง (ใช้เทียบกับวันนัดที่เก็บเป็นข้อความ)
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// "2026-11-20" -> "20 พ.ย. 2026"
+const formatDateKey = (key) => {
+  const [y, m, d] = String(key).split('-').map(Number);
+  if (!y || !m || !d) return key;
+  return `${d} ${THAI_MONTHS[m - 1]} ${y}`;
+};
+
+// เวลาซิงค์ล่าสุด: "วันนี้ 09:42", "เมื่อวาน 21:15", "27 ต.ค. 22:10"
+const formatSyncTime = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return `วันนี้ ${time}`;
+  if (d.toDateString() === yesterday.toDateString()) return `เมื่อวาน ${time}`;
+  return `${d.getDate()} ${THAI_MONTHS[d.getMonth()]} ${time}`;
+};
+
+// แถวข้อมูลในการ์ด: ป้ายซ้าย ค่าขวา
+function InfoRow({ label, children }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5 text-sm">
+      <span className="text-slate-400">{label}</span>
+      <span className="text-right font-semibold text-slate-700">{children}</span>
+    </div>
+  );
+}
+
+// popup รายละเอียดสมาชิก
+function MemberDetailModal({ member, onClose }) {
+  const navigate = useNavigate();
+  const [nextAppointment, setNextAppointment] = useState(undefined); // undefined = กำลังโหลด, null = ไม่มีนัด
+
+  // โหลดนัดหมายของสมาชิก แล้วเลือกนัดแรกที่ยังไม่ผ่านไป
+  useEffect(() => {
+    let ignore = false;
+    api.get(`/api/family-members/${member.id}/appointments`)
+      .then((res) => {
+        if (ignore) return;
+        const today = todayKey();
+        const upcoming = res.data
+          .filter((a) => a.appointment_date >= today)
+          .sort((a, b) => `${a.appointment_date} ${a.appointment_time}`.localeCompare(`${b.appointment_date} ${b.appointment_time}`));
+        setNextAppointment(upcoming[0] ?? null);
+      })
+      .catch(() => !ignore && setNextAppointment(null));
+    return () => {
+      ignore = true;
+    };
+  }, [member.id]);
+
+  // กด Esc เพื่อปิด
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const connected = Boolean(member.is_connected);
+  const syncTime = formatSyncTime(member.last_synced_at);
+  const statusClass =
+    member.status === 'ปกติ' ? 'bg-emerald-100 text-emerald-600'
+    : member.status === 'อันตราย' ? 'bg-rose-100 text-rose-500'
+    : 'bg-slate-100 text-slate-400';
+
+  // ไปหน้าอื่นพร้อมส่งสมาชิกที่เลือกไปด้วย หน้านั้นจะเลือกคนนี้ให้อัตโนมัติ
+  const goTo = (path) => navigate(path, { state: { memberId: member.id } });
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="member-detail-title"
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl border border-pink-100"
+      >
+        {/* ส่วนหัว: รูป ชื่อ ความสัมพันธ์ สถานะ */}
+        <div className="flex items-start justify-between gap-4 p-6 pb-5 border-b border-slate-100">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-14 h-14 bg-pink-100 text-pink-500 rounded-2xl flex items-center justify-center font-extrabold text-xl shadow-inner flex-shrink-0">
+              {member.name?.charAt(0) || 'U'}
+            </div>
+            <div className="min-w-0">
+              <h2 id="member-detail-title" className="font-bold text-slate-800 text-lg truncate">{member.name}</h2>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <span className="text-xs text-pink-500 font-medium bg-pink-50 px-2.5 py-0.5 rounded-full">
+                  {member.relation || 'สมาชิก'}
+                </span>
+                <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${statusClass}`}>
+                  {member.status || 'ไม่มีข้อมูล'}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="ปิด" className="text-slate-400 hover:text-slate-600 cursor-pointer p-1">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* ข้อมูลทั่วไป + อุปกรณ์ */}
+          <section>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">ข้อมูลทั่วไป & อุปกรณ์</h3>
+            <div className="divide-y divide-slate-100">
+              <InfoRow label="ชื่อ - นามสกุล">{member.name}</InfoRow>
+              <InfoRow label="ความสัมพันธ์">{member.relation || '-'}</InfoRow>
+              <InfoRow label="อุปกรณ์">
+                <span className="inline-flex items-center gap-1.5">
+                  <Watch className="w-4 h-4 text-pink-400" /> {member.device || 'ยังไม่ได้ระบุ'}
+                </span>
+              </InfoRow>
+              <InfoRow label="การเชื่อมต่อ">
+                {connected ? (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-600">
+                    <Wifi className="w-4 h-4" /> เชื่อมต่อแล้ว
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-slate-400">
+                    <WifiOff className="w-4 h-4" /> ยังไม่ได้เชื่อมต่อ
+                  </span>
+                )}
+              </InfoRow>
+              <InfoRow label="ซิงค์ล่าสุด">{syncTime || 'ยังไม่เคยซิงค์'}</InfoRow>
+            </div>
+          </section>
+
+          {/* นัดหมายถัดไป */}
+          <section className="rounded-2xl bg-pink-50/60 border border-pink-100 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarHeart className="w-4 h-4 text-pink-500" />
+              <h3 className="text-sm font-bold text-slate-800">นัดหมายถัดไป</h3>
+            </div>
+            {nextAppointment === undefined ? (
+              <p className="text-xs text-slate-400">กำลังโหลด...</p>
+            ) : nextAppointment ? (
+              <div>
+                <p className="text-pink-500 font-extrabold text-base">
+                  {formatDateKey(nextAppointment.appointment_date)} • {nextAppointment.appointment_time} น.
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {nextAppointment.doctor_name} • {nextAppointment.hospital_name}
+                </p>
+                <span className="inline-flex items-center gap-1 mt-2 bg-white text-pink-500 text-[11px] px-2.5 py-0.5 rounded-full font-medium">
+                  <Clock className="w-3 h-3" /> แจ้งเตือน{nextAppointment.reminder_note}
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">ยังไม่มีนัดหมายที่จะถึง</p>
+            )}
+          </section>
+
+          {/* ผู้ติดต่อฉุกเฉิน */}
+          <section className="rounded-2xl border border-slate-100 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <PhoneCall className="w-4 h-4 text-pink-500" />
+              <h3 className="text-sm font-bold text-slate-800">ผู้ติดต่อฉุกเฉิน</h3>
+            </div>
+            {member.emergency_contact_phone ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-800 truncate">{member.emergency_contact_name || '-'}</p>
+                  <p className="text-sm text-slate-500">{member.emergency_contact_phone}</p>
+                </div>
+                <a
+                  href={`tel:${member.emergency_contact_phone}`}
+                  className="bg-pink-400 hover:bg-pink-500 text-white text-xs font-bold px-4 py-2 rounded-full shadow-md shadow-pink-200 transition flex items-center gap-1.5 flex-shrink-0"
+                >
+                  <Phone className="w-3.5 h-3.5 fill-white" /> โทร
+                </a>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">ยังไม่มีข้อมูล (เพิ่มได้ที่หน้าภาพรวม)</p>
+            )}
+          </section>
+
+          {/* ปุ่มลัด */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <button
+              onClick={() => goTo('/data')}
+              className="flex items-center justify-between gap-2 px-4 py-3 rounded-2xl bg-pink-500 hover:bg-pink-600 text-white text-sm font-bold shadow-md shadow-pink-200 transition cursor-pointer"
+            >
+              <span className="flex items-center gap-2"><Heart className="w-4 h-4" /> ดูข้อมูลสุขภาพ</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => goTo('/appointments')}
+              className="flex items-center justify-between gap-2 px-4 py-3 rounded-2xl border border-pink-200 hover:bg-pink-50 text-pink-500 text-sm font-bold transition cursor-pointer"
+            >
+              <span className="flex items-center gap-2"><CalendarHeart className="w-4 h-4" /> จัดการนัดหมาย</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Party() {
   const [members, setMembers] = useState([]);
@@ -12,6 +228,9 @@ function Party() {
   const [newRelation, setNewRelation] = useState('คู่สมรส');
   const [customRelation, setCustomRelation] = useState('');
   const [newDevice, setNewDevice] = useState('Smart Watch');
+
+  // สมาชิกที่กำลังเปิดดูรายละเอียดใน popup (null = ปิด)
+  const [detailMember, setDetailMember] = useState(null);
 
   // ฟังก์ชันดึงข้อมูลสมาชิกทั้งหมด
   const fetchMembers = async () => {
@@ -157,7 +376,7 @@ function Party() {
 
                 {/* ปุ่มดูรายละเอียด */}
                 <button
-                  onClick={() => alert(`ดูรายละเอียดสุขภาพของ: ${member.name}`)}
+                  onClick={() => setDetailMember(member)}
                   className="bg-pink-50 hover:bg-pink-100 text-pink-500 text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1 cursor-pointer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" /> ดูรายละเอียด
@@ -203,6 +422,11 @@ function Party() {
           </div>
         )}
       </div>
+
+      {/* MODAL: รายละเอียดสมาชิก */}
+      {detailMember && (
+        <MemberDetailModal member={detailMember} onClose={() => setDetailMember(null)} />
+      )}
 
       {/* MODAL: เพิ่มสมาชิกใหม่ */}
       {isAddModalOpen && (

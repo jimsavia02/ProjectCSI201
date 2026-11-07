@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Plus, Clock, Trash2 } from 'lucide-react';
 import api from '../api.js';
 
@@ -24,6 +25,8 @@ const blockTyping = (e) => {
 };
 
 function Appointments() {
+  const location = useLocation();
+  const [preferredId] = useState(() => location.state?.memberId ?? null);
   const [members, setMembers] = useState([]);
   const [selectedMemberId, setSelectedMemberId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -63,7 +66,9 @@ function Appointments() {
         const res = await api.get('/api/family-members');
         setMembers(res.data);
         if (res.data.length > 0) {
-          setSelectedMemberId(res.data[0].id);
+          // เลือกสมาชิกที่ส่งมาจากหน้าอื่น (เช่น popup รายละเอียดในหน้าสมาชิก) ถ้าไม่มีเลือกคนแรก
+          const preferred = res.data.find((m) => m.id === preferredId);
+          setSelectedMemberId(preferred ? preferred.id : res.data[0].id);
         }
         setLoading(false);
       } catch (err) {
@@ -72,7 +77,7 @@ function Appointments() {
       }
     };
     fetchMembers();
-  }, []);
+  }, [preferredId]);
 
   useEffect(() => {
     if (!selectedMemberId) return;
