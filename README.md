@@ -65,3 +65,7 @@ npm run seed:health -- --reset
 UPDATE signup_login.users SET role = 'admin' WHERE email = 'อีเมลของบัญชีนั้น';
 
 จากนั้นเข้าสู่ระบบด้วยบัญชีนั้น (บัญชีแอดมินจะเข้าหน้าฝั่งผู้ใช้ไม่ได้ แนะนำให้แยกบัญชี)
+
+## วิธีเมคข้อมูล
+
+npm run seed:health -- --member=10 --days=30
