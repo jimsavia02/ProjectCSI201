@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS health_history (
   UNIQUE KEY unique_member_date (member_id, record_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. ตาราง health_readings (ข้อมูลสุขภาพรายครั้งจาก Smart Watch เก็บย้อนหลัง 7 วัน)
+-- 4. ตาราง health_readings (ข้อมูลสุขภาพรายครั้งจาก Smart Watch เก็บย้อนหลัง 90 วัน)
 CREATE TABLE IF NOT EXISTS health_readings (
   id INT AUTO_INCREMENT PRIMARY KEY,
   member_id INT NOT NULL,

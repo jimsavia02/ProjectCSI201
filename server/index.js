@@ -8,7 +8,7 @@ import session from "express-session";
 import crypto from "crypto";
 import axios from "axios";
 import "dotenv/config";
-import { READING_TYPES, purgeOldReadings, syncMockReadings } from "./mockHealth.js";
+import { READING_TYPES, purgeOldReadings, syncMockReadings, startOfDay } from "./mockHealth.js";
 
 // ------------------------------------------
 // 1. Environmental Variables Configuration
@@ -119,7 +119,7 @@ app.post("/register", async (req, res) => {
 app.post("/login", async (req, res) => {
   const { email, password } = req.body ?? {};
   if (!email || !password) {
-    return res.status(400).json({ error: "Email and password are required" });
+    return res.status(400).json({ error: "กรุณากรอก Email หรือ password" });
   }
   try {
     const [rows] = await db.execute(
@@ -128,7 +128,7 @@ app.post("/login", async (req, res) => {
     );
     const user = rows[0];
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: "Email or password is incorrect" });
+      return res.status(401).json({ error: "Email หรือ password ไม่ถูกต้อง" });
     }
 
     const token = jwt.sign(
@@ -146,7 +146,7 @@ app.post("/login", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: "Server มีความผิดพลาด" });
   }
 });
 
@@ -176,15 +176,12 @@ app.get("/api/account", verifyUser, async (req, res) => {
   }
 });
 
-// แก้ไขข้อมูลบัญชี (หน้าตั้งค่า): ชื่อ อีเมล เบอร์โทร และรหัสผ่าน
-// ถ้าช่องรหัสผ่านเว้นว่าง = ไม่เปลี่ยนรหัสผ่าน
+// แก้ไขข้อมูลบัญชี (หน้าตั้งค่า): ชื่อ อีเมล เบอร์โทร
+// (การเปลี่ยนรหัสผ่านแยกไปที่ PUT /api/account/password)
 app.put("/api/account", verifyUser, async (req, res) => {
-  const { name, email, phone, password } = req.body ?? {};
+  const { name, email, phone } = req.body ?? {};
   if (!name?.trim() || !email?.trim()) {
     return res.status(400).json({ error: "กรุณากรอกชื่อและอีเมล" });
-  }
-  if (password && password.length < 8) {
-    return res.status(400).json({ error: "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร" });
   }
 
   try {
@@ -192,10 +189,6 @@ app.put("/api/account", verifyUser, async (req, res) => {
       "UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?",
       [name.trim(), email.trim(), phone?.trim() || null, req.user.id]
     );
-    if (password) {
-      const hash = await bcrypt.hash(password, SALT_ROUNDS);
-      await db.execute("UPDATE users SET password = ? WHERE id = ?", [hash, req.user.id]);
-    }
 
     // ออก token ใหม่ เพื่อให้ชื่อที่แสดงบนแถบด้านบนเป็นชื่อใหม่ (role อ่านจากฐานข้อมูลล่าสุด)
     const [[{ role }]] = await db.execute("SELECT role FROM users WHERE id = ?", [req.user.id]);
@@ -212,6 +205,35 @@ app.put("/api/account", verifyUser, async (req, res) => {
       return res.status(409).json({ error: "อีเมลนี้ถูกใช้งานแล้ว" });
     }
     console.error("Update account error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// เปลี่ยนรหัสผ่าน (popup ในหน้าตั้งค่า): ต้องยืนยันรหัสผ่านปัจจุบันก่อน
+app.put("/api/account/password", verifyUser, async (req, res) => {
+  const { currentPassword, newPassword } = req.body ?? {};
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: "กรุณากรอกรหัสผ่านให้ครบ" });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร" });
+  }
+
+  try {
+    const [[user]] = await db.execute("SELECT password FROM users WHERE id = ?", [req.user.id]);
+    if (!user) {
+      return res.status(404).json({ error: "ไม่พบบัญชีผู้ใช้" });
+    }
+    if (!(await bcrypt.compare(currentPassword, user.password))) {
+      // ใช้ 400 ไม่ใช่ 401 เพราะผู้ใช้ยังล็อกอินอยู่ แค่กรอกรหัสผ่านผิด
+      return res.status(400).json({ error: "รหัสผ่านปัจจุบันไม่ถูกต้อง" });
+    }
+
+    const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await db.execute("UPDATE users SET password = ? WHERE id = ?", [hash, req.user.id]);
+    return res.json({ message: "เปลี่ยนรหัสผ่านเรียบร้อยแล้ว" });
+  } catch (err) {
+    console.error("Change password error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
@@ -545,6 +567,146 @@ app.get("/api/family-members/:memberId/readings", verifyUser, async (req, res) =
   } catch (err) {
     console.error("Fetch readings error:", err);
     return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลสุขภาพได้" });
+  }
+});
+
+// ------------------------------------------
+// 7.2 รายงานสุขภาพ (หน้า "รายงาน")
+// ------------------------------------------
+const REPORT_PERIODS = [7, 30, 90]; // 7 วัน / 30 วัน / 3 เดือน
+const SLEEP_GOAL = 7; // เป้าหมายการนอน (ชม./คืน)
+
+// แปลง Date เป็น "YYYY-MM-DD" ตามเวลาเครื่อง (ไม่ใช้ toISOString เพราะเป็นเวลา UTC)
+const toDateKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// เช่น /api/family-members/3/report?days=30
+app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => {
+  const { memberId } = req.params;
+  const days = Number(req.query.days) || 30;
+  if (!REPORT_PERIODS.includes(days)) {
+    return res.status(400).json({ error: "ช่วงเวลาไม่ถูกต้อง" });
+  }
+
+  try {
+    const [members] = await db.execute(
+      "SELECT id, name, relation, device FROM family_members WHERE id = ? AND user_id = ?",
+      [memberId, req.user.id]
+    );
+    const member = members[0];
+    if (!member) {
+      return res.status(404).json({ error: "ไม่พบสมาชิก" });
+    }
+
+    await purgeOldReadings(db);
+
+    const today = startOfDay(new Date());
+    const from = new Date(today);
+    from.setDate(from.getDate() - (days - 1));
+    const prevFrom = new Date(from); // ช่วงก่อนหน้าที่ยาวเท่ากัน (ใช้เทียบก้าวเดิน)
+    prevFrom.setDate(prevFrom.getDate() - days);
+
+    // ค่ารายวัน: ชีพจรเฉลี่ย/สูงสุด, ก้าวเดิน (ค่าสะสมสูงสุดของวัน = ยอดทั้งวัน), การนอน
+    const [rows] = await db.execute(
+      `SELECT DATE_FORMAT(recorded_at, '%Y-%m-%d') AS day, type,
+              AVG(value) AS avg_value, MAX(value) AS max_value
+       FROM health_readings
+       WHERE member_id = ? AND recorded_at >= ? AND value IS NOT NULL
+       GROUP BY day, type`,
+      [memberId, from]
+    );
+
+    const byDay = {};
+    for (const r of rows) {
+      const d = (byDay[r.day] ??= {});
+      if (r.type === "heart_rate") {
+        d.avg_hr = Math.round(Number(r.avg_value));
+        d.max_hr = Number(r.max_value);
+      } else if (r.type === "steps") {
+        d.steps = Number(r.max_value);
+      } else if (r.type === "sleep") {
+        d.sleep = Number(r.max_value);
+      }
+    }
+
+    // เติมให้ครบทุกวันในช่วง (วันที่ไม่มีข้อมูลเป็น null กราฟจะเว้นช่องไว้)
+    const daily = [];
+    for (let d = new Date(from); d <= today; d.setDate(d.getDate() + 1)) {
+      const key = toDateKey(d);
+      const v = byDay[key] ?? {};
+      daily.push({
+        date: key,
+        avg_hr: v.avg_hr ?? null,
+        max_hr: v.max_hr ?? null,
+        steps: v.steps ?? null,
+        sleep: v.sleep ?? null,
+      });
+    }
+
+    const average = (values) => {
+      const list = values.filter((v) => v !== null);
+      return list.length ? list.reduce((a, b) => a + b, 0) / list.length : null;
+    };
+    const avgHr = average(daily.map((d) => d.avg_hr));
+    const avgSteps = average(daily.map((d) => d.steps));
+    const avgSleep = average(daily.map((d) => d.sleep));
+
+    // ก้าวเฉลี่ยต่อวันของช่วงก่อนหน้า
+    const [[prev]] = await db.execute(
+      `SELECT AVG(daily_steps) AS avg_steps FROM (
+         SELECT MAX(value) AS daily_steps FROM health_readings
+         WHERE member_id = ? AND type = 'steps' AND value IS NOT NULL
+           AND recorded_at >= ? AND recorded_at < ?
+         GROUP BY DATE(recorded_at)
+       ) t`,
+      [memberId, prevFrom, from]
+    );
+
+    // ชีพจรสูงสุดรายครั้ง พร้อมเวลาที่วัดได้
+    const [[maxHr]] = await db.execute(
+      `SELECT value, recorded_at FROM health_readings
+       WHERE member_id = ? AND type = 'heart_rate' AND value IS NOT NULL AND recorded_at >= ?
+       ORDER BY value DESC, recorded_at DESC LIMIT 1`,
+      [memberId, from]
+    );
+
+    // นับการแจ้งเตือนจากค่าที่ผิดปกติ (ยังไม่มีตารางเก็บประวัติการแจ้งเตือนจริง)
+    //   ฉุกเฉิน: ชีพจร > 120 หรือ < 50
+    //   ผิดปกติ: ชีพจร 101-120 หรือ 50-59, ความเครียด > 70
+    const [[alerts]] = await db.execute(
+      `SELECT
+         SUM(type = 'heart_rate' AND (value > 120 OR value < 50)) AS emergency,
+         SUM((type = 'heart_rate' AND ((value > 100 AND value <= 120) OR (value >= 50 AND value < 60)))
+             OR (type = 'stress' AND value > 70)) AS warning
+       FROM health_readings
+       WHERE member_id = ? AND recorded_at >= ? AND value IS NOT NULL`,
+      [memberId, from]
+    );
+
+    return res.json({
+      member,
+      days,
+      from: toDateKey(from),
+      to: toDateKey(today),
+      daily,
+      summary: {
+        avg_hr: avgHr === null ? null : Math.round(avgHr),
+        avg_steps: avgSteps === null ? null : Math.round(avgSteps),
+        prev_avg_steps: prev.avg_steps === null ? null : Math.round(Number(prev.avg_steps)),
+        avg_sleep: avgSleep === null ? null : Math.round(avgSleep * 10) / 10,
+        sleep_goal: SLEEP_GOAL,
+        sleep_days: daily.filter((d) => d.sleep !== null).length,
+        short_sleep_days: daily.filter((d) => d.sleep !== null && d.sleep < SLEEP_GOAL).length,
+        max_hr: maxHr ? { value: Number(maxHr.value), recorded_at: maxHr.recorded_at } : null,
+        alerts: {
+          warning: Number(alerts.warning ?? 0),
+          emergency: Number(alerts.emergency ?? 0),
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Fetch report error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลรายงานได้" });
   }
 });
 

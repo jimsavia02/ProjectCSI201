@@ -7,6 +7,6 @@ const api = axios.create({
 })
 
 export const getErrorMessage = (err) =>
-  err.response?.data?.error || 'Cannot connect to the server'
+  err.response?.data?.error || 'ไม่สามารถเชื่อมต่อ Server ได้'
 
 export default api

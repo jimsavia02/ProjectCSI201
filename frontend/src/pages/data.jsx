@@ -61,6 +61,23 @@ function formatTime(value) {
   return `${d.getDate()} ${THAI_MONTHS[d.getMonth()]} ${time}`
 }
 
+// เลขหน้าที่จะแสดง: หน้าแรก หน้าสุดท้าย และหน้ารอบๆ หน้าปัจจุบัน ที่เหลือย่อเป็น "…"
+// เช่น หน้า 7 จาก 50 -> [1, '…', 6, 7, 8, '…', 50]
+function pageItems(page, totalPages) {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
+  const pages = new Set([1, totalPages, page - 1, page, page + 1])
+  if (page <= 3) [2, 3, 4].forEach((n) => pages.add(n))
+  if (page >= totalPages - 2) [totalPages - 3, totalPages - 2, totalPages - 1].forEach((n) => pages.add(n))
+
+  const sorted = [...pages].filter((n) => n >= 1 && n <= totalPages).sort((a, b) => a - b)
+  const items = []
+  sorted.forEach((n, i) => {
+    if (i > 0 && n - sorted[i - 1] > 1) items.push('…')
+    items.push(n)
+  })
+  return items
+}
+
 function Data() {
   const [members, setMembers] = useState([])
   const [memberId, setMemberId] = useState(null)
@@ -266,7 +283,7 @@ function Data() {
         {/* ท้ายตาราง: จำนวนรายการ + แบ่งหน้า */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#f6e6ed] px-6 py-4 text-xs text-[#a9939e]">
           <p>
-            แสดง {from}–{to} จาก {total} รายการ · ข้อมูลย้อนหลัง 7 วัน
+            แสดง {from}–{to} จาก {total} รายการ · ข้อมูลย้อนหลัง 90 วัน
           </p>
 
           {totalPages > 1 && (
@@ -279,7 +296,10 @@ function Data() {
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+              {pageItems(page, totalPages).map((n, i) =>
+                n === '…' ? (
+                  <span key={`gap-${i}`} className="grid h-8 w-8 place-items-center text-[#e3cdd7]">…</span>
+                ) : (
                 <button
                   key={n}
                   onClick={() => setPage(n)}
@@ -290,7 +310,8 @@ function Data() {
                 >
                   {n}
                 </button>
-              ))}
+                )
+              )}
               <button
                 onClick={() => setPage(page + 1)}
                 disabled={page === totalPages}

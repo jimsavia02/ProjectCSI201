@@ -2,6 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Clock, Trash2 } from 'lucide-react';
 import api from '../api.js';
 
+// ตัวเลือกเวลานัด แยกชั่วโมง (00-23) กับนาที (ทุก 5 นาที) ให้ผู้ใช้เลือกจากรายการ ไม่ต้องพิมพ์เอง
+const pad2 = (n) => String(n).padStart(2, '0');
+const HOURS = Array.from({ length: 24 }, (_, i) => pad2(i));
+const MINUTES = Array.from({ length: 12 }, (_, i) => pad2(i * 5));
+
+// คลิกช่องวันที่แล้วเปิดปฏิทินทันที (showPicker ไม่มีในเบราว์เซอร์เก่าบางตัว จึงครอบ try ไว้)
+const openPicker = (e) => {
+  try {
+    e.currentTarget.showPicker();
+  } catch {
+    // เบราว์เซอร์ไม่รองรับ: ผู้ใช้ยังกดไอคอนปฏิทินในช่องได้ตามปกติ
+  }
+};
+
+// กันการพิมพ์วันที่เอง (ยังกด Tab เพื่อเลื่อนช่อง และกด Enter/Space เพื่อเปิดปฏิทินได้)
+const blockTyping = (e) => {
+  if (e.key === 'Tab') return;
+  e.preventDefault();
+  if (e.key === 'Enter' || e.key === ' ') openPicker(e);
+};
+
 function Appointments() {
   const [members, setMembers] = useState([]);
   const [selectedMemberId, setSelectedMemberId] = useState(null);
@@ -179,28 +200,65 @@ function Appointments() {
 
             {showAddForm && (
               <form onSubmit={handleAddAppointment} className="mb-6 p-4 bg-pink-50/50 border border-pink-100 rounded-2xl space-y-3">
-                <h4 className="text-xs font-bold text-pink-600 mb-2">เพิ่มนัดหมายใหม่ (เลือกได้ตั้งแต่วันพรุ่งนี้เป็นต้นไป)</h4>
+                <h4 className="text-xs font-bold text-pink-600 mb-2">เพิ่มนัดหมายใหม่ (ต้องเลือกวันถัดจากวันนี้เท่านั้น!)</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[10px] text-slate-400 mb-1">วันที่</label>
                     <input
                       type="date"
                       required
+                      autoFocus
                       min={tomorrowStr}
                       value={newAppoint.date}
+                      onClick={openPicker}
+                      onKeyDown={blockTyping}
                       onChange={(e) => setNewAppoint({ ...newAppoint, date: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-pink-300"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-300"
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] text-slate-400 mb-1">เวลา</label>
-                    <input
-                      type="time"
-                      required
-                      value={newAppoint.time}
-                      onChange={(e) => setNewAppoint({ ...newAppoint, time: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-pink-300"
-                    />
+                    {(() => {
+                      // newAppoint.time เก็บเป็น "HH:MM" แยกออกมาเป็นชั่วโมงกับนาที
+                      const [hour = '', minute = ''] = newAppoint.time.split(':');
+                      // เลือกชั่วโมงก่อน -> นาทีเริ่มที่ 00 ให้อัตโนมัติ
+                      const setTime = (h, m) => setNewAppoint({ ...newAppoint, time: `${h}:${m}` });
+                      const selectClass = (value) =>
+                        `flex-1 min-w-0 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-300 ${
+                          value ? 'text-slate-700' : 'text-slate-400'
+                        }`;
+
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            required
+                            aria-label="ชั่วโมง"
+                            value={hour}
+                            onChange={(e) => setTime(e.target.value, minute || '00')}
+                            className={selectClass(hour)}
+                          >
+                            <option value="" disabled>ชม.</option>
+                            {HOURS.map((h) => (
+                              <option key={h} value={h} className="text-slate-700">{h}</option>
+                            ))}
+                          </select>
+                          <span className="text-xs font-bold text-slate-400">:</span>
+                          <select
+                            required
+                            aria-label="นาที"
+                            value={minute}
+                            onChange={(e) => setTime(hour, e.target.value)}
+                            className={selectClass(minute)}
+                          >
+                            <option value="" disabled>นาที</option>
+                            {MINUTES.map((m) => (
+                              <option key={m} value={m} className="text-slate-700">{m}</option>
+                            ))}
+                          </select>
+                          <span className="text-xs text-slate-400">น.</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 <input
@@ -278,15 +336,20 @@ function Appointments() {
                   );
                 })
               ) : (
-                <div className="text-center py-10 border-2 border-dashed border-pink-100 rounded-2xl bg-pink-50/20">
-                  <p className="text-xs text-slate-400 mb-2">ยังไม่มีรายการนัดหมายสำหรับสมาชิกคนนี้</p>
+                // ซ่อนกล่องนี้ตอนเปิดฟอร์มอยู่ ให้ฟอร์มขึ้นมาแทนที่
+                !showAddForm && (
                   <button
+                    type="button"
                     onClick={() => setShowAddForm(true)}
-                    className="text-xs text-pink-500 font-bold hover:underline"
+                    disabled={!selectedMemberId}
+                    className="group w-full text-center py-10 border-2 border-dashed border-pink-100 rounded-2xl bg-pink-50/20 transition cursor-pointer hover:border-pink-300 hover:bg-pink-50/60 disabled:cursor-default disabled:hover:border-pink-100 disabled:hover:bg-pink-50/20"
                   >
-                    + คลิกเพื่อสร้างนัดหมายแรก
+                    <p className="text-xs text-slate-400 mb-2">ยังไม่มีรายการนัดหมายสำหรับสมาชิกคนนี้</p>
+                    <span className="text-xs text-pink-500 font-bold group-hover:underline">
+                      + คลิกเพื่อสร้างนัดหมายแรก
+                    </span>
                   </button>
-                </div>
+                )
               )}
             </div>
           </div>

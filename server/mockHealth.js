@@ -4,7 +4,7 @@
 // ------------------------------------------
 
 export const READING_TYPES = ["heart_rate", "steps", "sleep", "stress"];
-export const RETENTION_DAYS = 7; // เก็บข้อมูลย้อนหลังแค่ 7 วัน
+export const RETENTION_DAYS = 90; // เก็บข้อมูลย้อนหลัง 90 วัน (หน้ารายงานดูย้อนหลังได้สูงสุด 3 เดือน)
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -32,7 +32,7 @@ export const startOfDay = (date) => {
   return d;
 };
 
-// ลบข้อมูลที่เก่ากว่า 7 วันทิ้ง
+// ลบข้อมูลที่เก่ากว่า RETENTION_DAYS วันทิ้ง
 export async function purgeOldReadings(db) {
   await db.execute(
     `DELETE FROM health_readings WHERE recorded_at < NOW() - INTERVAL ${RETENTION_DAYS} DAY`

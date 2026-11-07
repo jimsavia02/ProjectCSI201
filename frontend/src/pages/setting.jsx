@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
+import { Eye, EyeOff, KeyRound } from 'lucide-react'
 import api, { getErrorMessage } from '../api.js'
 
 // สวิตช์การแจ้งเตือน (ตอนนี้กดเปิด/ปิดได้อย่างเดียว ยังไม่ได้บันทึกและยังไม่ได้ส่งแจ้งเตือนจริง)
@@ -38,9 +39,180 @@ function Toggle({ checked, onChange, label }) {
   )
 }
 
+const EMPTY_PASSWORDS = { currentPassword: '', newPassword: '', confirmPassword: '' }
+
+// ช่องรหัสผ่านพร้อมปุ่มรูปตา กดเพื่อแสดง/ซ่อนรหัสผ่าน
+function PasswordInput({ id, label, hint, hintTone = 'muted', ...props }) {
+  const [visible, setVisible] = useState(false)
+  const hintColor = { muted: 'text-[#9d8994]', ok: 'text-emerald-600', error: 'text-red-600' }[hintTone]
+
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-semibold text-[#786671]">
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          name={id}
+          type={visible ? 'text' : 'password'}
+          aria-describedby={hint ? `${id}-hint` : undefined}
+          className={`${inputClass} pr-12`}
+          {...props}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+          className="absolute inset-y-0 right-0 grid w-12 cursor-pointer place-items-center text-[#b8a4ae] hover:text-[#f05289]"
+        >
+          {visible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+        </button>
+      </div>
+      {hint && (
+        <p id={`${id}-hint`} className={`mt-1.5 text-xs ${hintColor}`}>
+          {hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// popup เปลี่ยนรหัสผ่าน
+function ChangePasswordModal({ onClose, onSuccess }) {
+  const [values, setValues] = useState(EMPTY_PASSWORDS)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // กด Esc เพื่อปิด popup
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && !saving && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, saving])
+
+  const handleChange = (e) => {
+    setValues({ ...values, [e.target.name]: e.target.value })
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    if (values.newPassword !== values.confirmPassword) {
+      setError('รหัสผ่านใหม่และการยืนยันไม่ตรงกัน')
+      return
+    }
+    if (values.newPassword === values.currentPassword) {
+      setError('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await api.put('/api/account/password', {
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
+      })
+      onSuccess(res.data.message)
+    } catch (err) {
+      setError(getErrorMessage(err))
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#3c3038]/40 p-4 backdrop-blur-sm"
+      onClick={() => !saving && onClose()}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="change-password-title"
+        className="w-full max-w-md rounded-[22px] border border-[#f1dce5] bg-white p-6 shadow-2xl shadow-pink-200/60 md:p-7"
+      >
+        <h2 id="change-password-title" className="text-lg font-semibold text-[#3c3038]">
+          เปลี่ยนรหัสผ่าน
+        </h2>
+        <p className="mt-1 text-sm text-[#8e7c87]">รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร</p>
+
+        {error && (
+          <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 space-y-4">
+          <PasswordInput
+            id="currentPassword"
+            label="รหัสผ่านปัจจุบัน"
+            autoComplete="current-password"
+            required
+            autoFocus
+            value={values.currentPassword}
+            onChange={handleChange}
+          />
+          <PasswordInput
+            id="newPassword"
+            label="รหัสผ่านใหม่"
+            autoComplete="new-password"
+            required
+            minLength={8}
+            value={values.newPassword}
+            onChange={handleChange}
+            hint={
+              values.newPassword && values.newPassword.length >= 8
+                ? '✓ ความยาวเพียงพอ'
+                : 'ต้องมีอย่างน้อย 8 ตัวอักษร'
+            }
+            hintTone={values.newPassword.length >= 8 ? 'ok' : 'muted'}
+          />
+          <PasswordInput
+            id="confirmPassword"
+            label="ยืนยันรหัสผ่านใหม่"
+            autoComplete="new-password"
+            required
+            minLength={8}
+            value={values.confirmPassword}
+            onChange={handleChange}
+            hint={
+              values.confirmPassword
+                ? values.confirmPassword === values.newPassword
+                  ? '✓ รหัสผ่านตรงกัน'
+                  : 'รหัสผ่านไม่ตรงกัน'
+                : undefined
+            }
+            hintTone={values.confirmPassword === values.newPassword ? 'ok' : 'error'}
+          />
+        </div>
+
+        <div className="mt-7 flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 cursor-pointer rounded-[15px] border border-[#f1dce5] py-3 font-medium text-[#786671] transition hover:bg-[#fff5f8] disabled:opacity-60"
+          >
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex-1 cursor-pointer rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] py-3 font-medium text-white shadow-md shadow-pink-200 transition hover:brightness-95 disabled:opacity-60"
+          >
+            {saving ? 'กำลังบันทึก...' : 'เปลี่ยนรหัสผ่าน'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 function Setting() {
   const { setUser, onLogout } = useOutletContext()
-  const [values, setValues] = useState({ name: '', email: '', phone: '', password: '' })
+  const [values, setValues] = useState({ name: '', email: '', phone: '' })
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [savedName, setSavedName] = useState('') // ชื่อ/อีเมลที่บันทึกแล้ว ใช้แสดงบนการ์ดโปรไฟล์
   const [savedEmail, setSavedEmail] = useState('')
   const [loading, setLoading] = useState(true)
@@ -55,7 +227,7 @@ function Setting() {
     api.get('/api/account')
       .then((res) => {
         const { name, email, phone } = res.data
-        setValues({ name, email, phone: phone || '', password: '' })
+        setValues({ name, email, phone: phone || '' })
         setSavedName(name)
         setSavedEmail(email)
       })
@@ -75,7 +247,6 @@ function Setting() {
       const res = await api.put('/api/account', values)
       setSavedName(values.name.trim())
       setSavedEmail(values.email.trim())
-      setValues({ ...values, password: '' })
       setUser((u) => ({ ...u, name: values.name.trim() })) // อัปเดตชื่อบนแถบด้านบนทันที
       setMessage({ type: 'success', text: res.data.message })
     } catch (err) {
@@ -148,22 +319,6 @@ function Setting() {
                 className={inputClass}
               />
             </div>
-            <div>
-              <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-[#786671]">
-                รหัสผ่าน
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                placeholder="เว้นว่างไว้ถ้าไม่ต้องการเปลี่ยน"
-                value={values.password}
-                onChange={handleChange}
-                className={inputClass}
-              />
-            </div>
           </div>
 
           <button
@@ -173,7 +328,43 @@ function Setting() {
           >
             {saving ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
           </button>
+
+          {/* ส่วนความปลอดภัย: แยกการเปลี่ยนรหัสผ่านออกจากฟอร์มข้อมูลบัญชี */}
+          <div className="mt-7 border-t border-[#f6e6ed] pt-6">
+            <h3 className="text-base font-semibold">ความปลอดภัย</h3>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ffedf3] text-[#f05289]">
+                  <KeyRound className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="font-semibold">รหัสผ่าน</p>
+                  <p className="text-xs text-[#9d8994]">ควรใช้รหัสผ่านที่คาดเดายากอย่างน้อย 8 ตัวอักษร</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMessage({ type: '', text: '' })
+                  setIsPasswordModalOpen(true)
+                }}
+                className="cursor-pointer rounded-[12px] border border-[#f1dce5] bg-white px-4 py-2 text-sm font-semibold text-[#f05289] transition hover:border-[#f66c9c] hover:bg-[#fff5f8]"
+              >
+                เปลี่ยนรหัสผ่าน
+              </button>
+            </div>
+          </div>
         </form>
+
+        {isPasswordModalOpen && (
+          <ChangePasswordModal
+            onClose={() => setIsPasswordModalOpen(false)}
+            onSuccess={(text) => {
+              setIsPasswordModalOpen(false)
+              setMessage({ type: 'success', text })
+            }}
+          />
+        )}
 
         {/* การ์ดขวา: การแจ้งเตือน & ความเป็นส่วนตัว */}
         <div className="flex flex-col rounded-[22px] border border-[#f1dce5] bg-white p-6 md:p-7">
