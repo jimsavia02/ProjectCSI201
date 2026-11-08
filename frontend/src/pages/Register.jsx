@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { HandHeart, Heart, Lock, Mail, UserRound } from 'lucide-react'
 import api, { getErrorMessage } from '../api.js'
 
 function Register() {
-  const [values, setValues] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' })
+  const [values, setValues] = useState({ name: '', email: '', password: '', confirmPassword: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
@@ -12,20 +13,18 @@ function Register() {
     setValues({ ...values, [e.target.name]: e.target.value })
   }
 
-  // เบอร์โทรมีตัวอักษรอื่นนอกจากตัวเลข -> แสดงคำเตือนและกดสมัครไม่ได้
-  const phoneInvalid = /\D/.test(values.phone)
-
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     if (values.password !== values.confirmPassword) {
-      setError('Passwords do not match')
+      setError('รหัสผ่านทั้งสองช่องไม่ตรงกัน')
       return
     }
     setLoading(true)
     try {
-      const { name, email, phone, password } = values
-      await api.post('/register', { name, email, phone, password })
+      // เบอร์โทรไม่ต้องกรอกตอนสมัคร (server เก็บเป็น NULL) ผู้ใช้เพิ่มเองได้ในหน้าตั้งค่า
+      const { name, email, password } = values
+      await api.post('/register', { name, email, password })
       // สมัครสำเร็จ: ไปหน้ายินดีต้อนรับ พร้อมส่งชื่อไปแสดง
       navigate('/welcome', { state: { name } })
     } catch (err) {
@@ -36,98 +35,81 @@ function Register() {
   }
 
   const inputClass =
-    'mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500'
+    'w-full rounded-2xl border border-white/80 bg-white/80 py-3 pl-11 pr-4 text-sm text-slate-700 shadow-sm outline-none transition placeholder:text-slate-300 focus:border-pink-300 focus:bg-white focus:ring-4 focus:ring-pink-200/60'
+  const iconClass = 'pointer-events-none absolute left-4 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-pink-300'
+  const labelClass = 'mb-2 block text-sm text-slate-600'
 
   return (
-<div className="min-h-screen bg-[#fffafd]">
-  <div className="flex min-h-screen w-full overflow-hidden bg-[#fffafd]">
-        <aside className="hidden w-[228px] shrink-0 bg-[#ffedf3] px-6 py-8 md:block">
-          <div className="mb-10 flex items-center gap-4">
-            <div className="grid h-13 w-13 place-items-center rounded-2xl bg-[#fa6c9e] text-3xl text-white">
-              ♡
-            </div>
-            <div>
-              <strong className="block text-[17px] text-[#3c3038]">PINK STUDIO</strong>
-              <span className="text-xs text-[#a88e9b]">MEMBER SPACE</span>
-            </div>
+    <div className="relative min-h-screen overflow-hidden bg-linear-to-br from-pink-100 via-pink-200 to-pink-300 px-4 py-10 font-prompt sm:px-8">
+      {/* แสงฟุ้งและฟองตกแต่งพื้นหลัง */}
+      <span className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/30 blur-3xl" />
+      <span className="pointer-events-none absolute bottom-16 left-10 hidden h-28 w-28 rounded-full bg-pink-400/40 md:block" />
+      <span className="pointer-events-none absolute bottom-36 left-40 hidden h-10 w-10 rounded-full bg-pink-400/40 md:block" />
+      <span className="pointer-events-none absolute bottom-6 left-36 hidden h-16 w-16 rounded-full bg-pink-400/40 md:block" />
+
+      <div className="relative mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-10 md:grid-cols-[2fr_3fr]">
+        {/* ฝั่งซ้าย: แบรนด์ */}
+        <div className="hidden flex-col items-center text-pink-500 md:flex">
+          <p className="mb-6 text-lg font-semibold tracking-wide">PINK STUDIO</p>
+
+          <div className="relative h-56 w-56">
+            <span className="absolute inset-0 rounded-full bg-white/40" />
+            <span className="absolute inset-8 rounded-full border-2 border-white" />
+            <Heart
+              className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2 text-white"
+              strokeWidth={1.5}
+            />
           </div>
 
-          <nav className="space-y-3">
-            <a
-              href="#"
-              className="block rounded-2xl border border-[#ff9cba] bg-white px-4 py-3 font-medium text-[#f05289]"
-            >
-              ♡ สมัครสมาชิก
-            </a>
-          </nav>
-        </aside>
+          <h2 className="-mt-6 text-5xl font-bold leading-tight drop-shadow-sm">
+            เริ่มต้น
+            <br />
+            <span className="pl-12">ไปด้วยกัน</span>
+          </h2>
+        </div>
 
-        {/* เนื้อหาหลัก */}
-        <main className="relative flex-1 px-5 py-8 md:px-12 md:py-12">
-          <Link to="/login" className="text-sm text-[#a28d98] hover:underline">
-            กลับหน้าเข้าสู่ระบบ
-          </Link>
+        {/* ฝั่งขวา: การ์ดฟอร์มสมัครสมาชิก */}
+        <form
+          onSubmit={handleSubmit}
+          className="mx-auto w-full max-w-2xl rounded-[2rem] border border-white/70 bg-white/35 p-8 shadow-2xl shadow-pink-400/20 backdrop-blur-xl sm:p-10"
+        >
+          <p className="mb-6 text-sm font-semibold tracking-wide text-pink-500 md:hidden">PINK STUDIO</p>
 
-          <h1 className="mt-5 text-3xl font-semibold text-[#3c3038]">
+          <h1 className="flex items-center gap-2 text-3xl font-bold text-pink-500">
             สร้างบัญชีใหม่
+            <HandHeart className="h-8 w-8" strokeWidth={2} aria-hidden="true" />
           </h1>
-          <p className="mb-7 text-[#8e7c87]">กรอกข้อมูลเพื่อเริ่มต้นใช้งาน</p>
+          <p className="mt-1 text-sm text-slate-500">สร้างบัญชีของคุณเพื่อเข้าใช้ PINK STUDIO</p>
 
-          {/* วงกลมหัวใจตกแต่ง */}
-          <div className="absolute right-10 top-16 hidden h-36 w-36 items-center justify-center rounded-full bg-[#ff9dbc] text-5xl text-[#f4518c] md:flex">
-            <div className="flex h-24 w-24 items-center justify-center rounded-full bg-[#ffd9e5]">
-              ♥
-            </div>
-          </div>
+          {error && (
+            <p role="alert" className="mt-6 rounded-2xl bg-red-50/90 px-4 py-3 text-sm text-red-600">
+              {error}
+            </p>
+          )}
 
-
-          <form
-            onSubmit={handleSubmit}
-            className="rounded-[22px] border border-[#f1dce5] bg-white p-5 md:mt-7 md:p-7"
-          >
-            {/* ขั้นตอน */}
-            <div className="mb-7 flex items-center gap-3 text-sm">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fa6c9e] text-base font-semibold text-white">
-                1
-              </span>
-              <span className="shrink-0 text-[#f05289]">ข้อมูลส่วนตัว</span>
-              <span className="h-[3px] flex-1 bg-[#f6cedd]" />
-              <span className="shrink-0 text-[#a9939e]">2　ตั้งค่าบัญชี</span>
-              <span className="hidden h-[3px] flex-1 bg-[#f6cedd] sm:block" />
-
-            </div>
-
-            {error && (
-              <p
-                role="alert"
-                className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700"
-              >
-                {error}
-              </p>
-            )}
-
-            <div className="grid gap-x-6 gap-y-5 md:grid-cols-2">
-              <div>
-                <label htmlFor="name" className="mb-2 block text-[#786671]">
-                  ชื่อ - นามสกุล
-                </label>
+          <div className="mt-8 grid gap-x-6 gap-y-5 sm:grid-cols-2">
+            <div>
+              <label htmlFor="name" className={labelClass}>ชื่อ - นามสกุล</label>
+              <div className="relative">
+                <UserRound className={iconClass} aria-hidden="true" />
                 <input
                   id="name"
                   name="name"
                   type="text"
                   autoComplete="name"
-                  placeholder="กรอกชื่อของคุณ"
+                  placeholder="กรอกชื่อ-นามสกุลของคุณ"
                   required
                   value={values.name}
                   onChange={handleChange}
-                  className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
+                  className={inputClass}
                 />
               </div>
+            </div>
 
-              <div>
-                <label htmlFor="email" className="mb-2 block text-[#786671]">
-                  อีเมล
-                </label>
+            <div>
+              <label htmlFor="email" className={labelClass}>อีเมล</label>
+              <div className="relative">
+                <Mail className={iconClass} aria-hidden="true" />
                 <input
                   id="email"
                   name="email"
@@ -137,43 +119,15 @@ function Register() {
                   required
                   value={values.email}
                   onChange={handleChange}
-                  className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
+                  className={inputClass}
                 />
               </div>
+            </div>
 
-              <div>
-                <label htmlFor="phone" className="mb-2 block text-[#786671]">
-                  เบอร์โทรศัพท์
-                </label>
-                <input
-                  id="phone"
-                  name="phone"
-                  type="tel"
-                  inputMode="numeric"
-                  autoComplete="tel"
-                  placeholder="0812345678"
-                  maxLength={10}
-                  value={values.phone}
-                  onChange={handleChange}
-                  aria-invalid={phoneInvalid}
-                  aria-describedby={phoneInvalid ? 'phone-warning' : undefined}
-                  className={`w-full rounded-[14px] border px-4 py-4 outline-none placeholder:text-[#a9939e] focus:ring-2 ${
-                    phoneInvalid
-                      ? 'border-red-400 focus:border-red-400 focus:ring-red-100'
-                      : 'border-[#e9d7e0] focus:border-[#f66c9c] focus:ring-[#ffe3ed]'
-                  }`}
-                />
-                {phoneInvalid && (
-                  <p id="phone-warning" className="mt-1.5 text-sm text-red-600">
-                    ควรใส่เฉพาะตัวเลข
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="password" className="mb-2 block text-[#786671]">
-                  รหัสผ่าน
-                </label>
+            <div>
+              <label htmlFor="password" className={labelClass}>รหัสผ่าน</label>
+              <div className="relative">
+                <Lock className={iconClass} aria-hidden="true" />
                 <input
                   id="password"
                   name="password"
@@ -184,17 +138,15 @@ function Register() {
                   minLength={8}
                   value={values.password}
                   onChange={handleChange}
-                  className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
+                  className={inputClass}
                 />
               </div>
-              {/* ยืนยันรหัสผ่าน: กว้างเท่าช่องรหัสผ่าน และอยู่คอลัมน์ขวาใต้ช่องรหัสผ่าน */}
-              <div className="md:col-start-2">
-                <label
-                  htmlFor="confirmPassword"
-                  className="mb-2 block text-[#786671]"
-                >
-                  ยืนยันรหัสผ่าน
-                </label>
+            </div>
+
+            <div>
+              <label htmlFor="confirmPassword" className={labelClass}>ยืนยันรหัสผ่าน</label>
+              <div className="relative">
+                <Lock className={iconClass} aria-hidden="true" />
                 <input
                   id="confirmPassword"
                   name="confirmPassword"
@@ -204,38 +156,36 @@ function Register() {
                   required
                   value={values.confirmPassword}
                   onChange={handleChange}
-                  className="w-full rounded-[14px] border border-[#e9d7e0] px-4 py-4 outline-none placeholder:text-[#a9939e] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]"
+                  className={inputClass}
                 />
               </div>
             </div>
+          </div>
 
-            <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <label className="flex items-center gap-3 text-sm text-[#9d8994]">
-                <input
-                  type="checkbox"
-                  required
-                  className="h-5 w-5 accent-[#fa6c9e]"
-                />
-                ยินยอมรับข้อกำหนดและนโยบายความเป็นส่วนตัว
-              </label>
+          <label className="mt-6 flex items-center gap-3 text-sm text-slate-500">
+            <input type="checkbox" required className="h-4 w-4 shrink-0 accent-pink-500" />
+            <span>
+              ยินยอมรับ<span className="text-pink-500">ข้อกำหนดและนโยบายความเป็นส่วนตัว</span>
+            </span>
+          </label>
 
-              <button
-                type="submit"
-                disabled={loading || phoneInvalid}
-                className="rounded-[15px] bg-gradient-to-r from-[#ff83ad] to-[#f34c8c] px-10 py-3 text-lg font-medium text-white transition hover:brightness-95 disabled:opacity-60"
-              >
-                {loading ? 'กำลังสร้างบัญชี...' : 'ถัดไป'}
-              </button>
-            </div>
+          <div className="mt-6 flex justify-center">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full max-w-xs cursor-pointer rounded-2xl bg-linear-to-r from-pink-300 to-pink-500 py-3.5 font-semibold text-white shadow-lg shadow-pink-400/30 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? 'กำลังสร้างบัญชี...' : 'สมัครสมาชิก'}
+            </button>
+          </div>
 
-            <p className="mt-5 text-sm text-[#9d8994]">
-              มีบัญชีอยู่แล้ว?{' '}
-              <Link to="/login" className="text-[#f05289] hover:underline">
-                เข้าสู่ระบบ
-              </Link>
-            </p>
-          </form>
-        </main>
+          <p className="mt-5 text-center text-sm text-slate-400">
+            มีบัญชีอยู่แล้ว?
+            <Link to="/login" className="ml-4 font-semibold text-pink-500 hover:underline">
+              เข้าสู่ระบบ
+            </Link>
+          </p>
+        </form>
       </div>
     </div>
   )
