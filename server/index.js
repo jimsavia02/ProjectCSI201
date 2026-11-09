@@ -88,7 +88,6 @@ const verifyUser = (req, res, next) => {
   }
 };
 
-// เบอร์โทร: ตัวเลขล้วน ไม่เกิน 10 หลัก (ว่างได้ = ไม่กรอก)
 const PHONE_ERROR = "เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น และไม่เกิน 10 หลัก";
 const isValidPhone = (phone) => {
   if (phone == null || phone === "") return true;
@@ -111,7 +110,6 @@ app.post("/register", async (req, res) => {
   }
   try {
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
-    // เบอร์โทรไม่บังคับกรอก ถ้าเว้นว่างจะเก็บเป็น NULL
     await db.execute(
       "INSERT INTO users (name, email, phone, password) VALUES (?, ?, ?, ?)",
       [name, email, phone?.trim() || null, hash]
@@ -169,7 +167,6 @@ app.post("/logout", (req, res) => {
   return res.json({ message: "Logged out" });
 });
 
-// ดึงข้อมูลบัญชีของผู้ใช้ที่ล็อกอินอยู่ (หน้าตั้งค่า)
 app.get("/api/account", verifyUser, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -186,8 +183,6 @@ app.get("/api/account", verifyUser, async (req, res) => {
   }
 });
 
-// แก้ไขข้อมูลบัญชี (หน้าตั้งค่า): ชื่อ อีเมล เบอร์โทร
-// (การเปลี่ยนรหัสผ่านแยกไปที่ PUT /api/account/password)
 app.put("/api/account", verifyUser, async (req, res) => {
   const { name, email, phone } = req.body ?? {};
   if (!name?.trim() || !email?.trim()) {
@@ -203,7 +198,6 @@ app.put("/api/account", verifyUser, async (req, res) => {
       [name.trim(), email.trim(), phone?.trim() || null, req.user.id]
     );
 
-    // ออก token ใหม่ เพื่อให้ชื่อที่แสดงบนแถบด้านบนเป็นชื่อใหม่ (role อ่านจากฐานข้อมูลล่าสุด)
     const [[{ role }]] = await db.execute("SELECT role FROM users WHERE id = ?", [req.user.id]);
     const token = jwt.sign(
       { id: req.user.id, name: name.trim(), role },
@@ -222,7 +216,6 @@ app.put("/api/account", verifyUser, async (req, res) => {
   }
 });
 
-// เปลี่ยนรหัสผ่าน (popup ในหน้าตั้งค่า): ต้องยืนยันรหัสผ่านปัจจุบันก่อน
 app.put("/api/account/password", verifyUser, async (req, res) => {
   const { currentPassword, newPassword } = req.body ?? {};
   if (!currentPassword || !newPassword) {
@@ -238,7 +231,6 @@ app.put("/api/account/password", verifyUser, async (req, res) => {
       return res.status(404).json({ error: "ไม่พบบัญชีผู้ใช้" });
     }
     if (!(await bcrypt.compare(currentPassword, user.password))) {
-      // ใช้ 400 ไม่ใช่ 401 เพราะผู้ใช้ยังล็อกอินอยู่ แค่กรอกรหัสผ่านผิด
       return res.status(400).json({ error: "รหัสผ่านปัจจุบันไม่ถูกต้อง" });
     }
 
@@ -254,13 +246,10 @@ app.put("/api/account/password", verifyUser, async (req, res) => {
 // ------------------------------------------
 // 5. Family Members & Management Routes
 // ------------------------------------------
-// ดึงรายชื่อสมาชิกครอบครัวทั้งหมดของผู้ใช้ที่ล็อกอินอยู่ (ใช้แสดงในหน้าสมาชิกครอบครัว)
-// เรียงจากสมาชิกที่เพิ่มล่าสุดขึ้นก่อน
+
 app.get("/api/family-members", verifyUser, async (req, res) => {
   try {
     const currentUserId = req.user.id;
-    // เลือกเฉพาะคอลัมน์ที่มีอยู่จริงในตาราง family_members
-    // (ข้อมูลนัดหมายแพทย์แยกไปอยู่ที่ตาราง appointments แล้ว)
     const [rows] = await db.execute(
       `SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected,
               last_synced_at, emergency_contact_name, emergency_contact_phone
@@ -274,7 +263,7 @@ app.get("/api/family-members", verifyUser, async (req, res) => {
   }
 });
 
-// เพิ่มสมาชิกครอบครัวใหม่
+// เพิ่มสมาชิกใหม่: ตั้งค่าเริ่มต้นเป็น '-' และสถานะ 'ไม่มีข้อมูล'
 app.post("/api/family-members", verifyUser, async (req, res) => {
   const currentUserId = req.user.id;
   const { name, relation, device } = req.body;
@@ -284,20 +273,27 @@ app.post("/api/family-members", verifyUser, async (req, res) => {
   }
 
   try {
+    const defaultDevice = device || 'Garmin Smartwatch';
     const [result] = await db.execute(
       `INSERT INTO family_members (user_id, name, relation, device, heart_rate, steps, sleep, status, is_connected)
-       VALUES (?, ?, ?, ?, '75 bpm', '0', '7.5 ชม.', 'ปกติ', 0)`,
-      [currentUserId, name, relation, device || 'Smart Watch']
+       VALUES (?, ?, ?, ?, '-', '-', '-', 'ไม่มีข้อมูล', 0)`,
+      [currentUserId, name, relation, defaultDevice]
     );
 
-    return res.status(201).json({ message: "เพิ่มสมาชิกสำเร็จ", id: result.insertId });
+    const [newMemberRows] = await db.execute(
+      `SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected,
+              last_synced_at, emergency_contact_name, emergency_contact_phone
+       FROM family_members WHERE id = ?`,
+      [result.insertId]
+    );
+
+    return res.status(201).json(newMemberRows[0]);
   } catch (err) {
     console.error("Add family member error:", err);
     return res.status(500).json({ error: "ไม่สามารถเพิ่มสมาชิกได้" });
   }
 });
 
-// ลบสมาชิกครอบครัว
 app.delete("/api/family-members/:id", verifyUser, async (req, res) => {
   const { id } = req.params;
   const currentUserId = req.user.id;
@@ -319,7 +315,6 @@ app.delete("/api/family-members/:id", verifyUser, async (req, res) => {
   }
 });
 
-// Cache สำหรับเก็บประวัติ Real-time HR กราฟ
 const liveHrCache = {};
 
 app.get("/api/family-members/:memberId/realtime-hr", verifyUser, async (req, res) => {
@@ -468,11 +463,9 @@ app.put("/api/family-members/:memberId/emergency-contact", verifyUser, async (re
 // 7. Garmin Integration & Mock Sync Data
 // ------------------------------------------
 
-// Endpoint สำหรับเริ่มต้นเชื่อมต่อ Garmin (รองรับการตั้งค่า OAuth ขั้นต้น)
 app.get("/api/garmin/connect/:memberId", verifyUser, (req, res) => {
   const { memberId } = req.params;
   
-  // หากยังไม่ได้ตั้งค่า Client ID ใน .env ให้แจ้งเตือน หรือใช้ระบบ Mock จำลองการเชื่อมต่อแทน
   if (!GARMIN_CLIENT_ID) {
     return res.status(400).json({ 
       error: "ยังไม่ได้กำหนดค่า Garmin Client ID ในระบบ (สามารถใช้ Mock Sync ทดแทนได้)",
@@ -480,7 +473,6 @@ app.get("/api/garmin/connect/:memberId", verifyUser, (req, res) => {
     });
   }
 
-  // ตัวอย่าง URL สำหรับ redirect ไปยัง Garmin OAuth 2.0
   const authUrl = `https://connect.garmin.com/oauth2/authorize?client_id=${GARMIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(GARMIN_REDIRECT_URI)}&response_type=code`;
   return res.json({ authUrl });
 });
@@ -500,7 +492,6 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
       return res.status(404).json({ error: "ไม่พบสมาชิก" });
     }
 
-    // สร้างค่าใหม่ 3-4 ค่าลง health_readings แล้วใช้ค่าล่าสุดเป็นสรุปของสมาชิก
     const latest = await syncMockReadings(db, memberId, member.device || "Smart Watch");
     const randomHr = latest.heart_rate;
     const newStepsNum = latest.steps ?? 0;
@@ -515,7 +506,6 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
     if (randomHr > 100 || randomHr < 50) status = "อันตราย";
     if (body.status) status = body.status;
 
-    // อัปเดตสถานะว่าเชื่อมต่ออุปกรณ์สำเร็จ (is_connected = 1)
     await db.execute(
       `UPDATE family_members 
        SET heart_rate = ?, steps = ?, sleep = ?, status = ?, is_connected = 1, last_synced_at = NOW()
@@ -533,12 +523,29 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
   }
 });
 
+// Endpoint หยุด Mock ข้อมูลและรีเซ็ตเป็นไม่มีข้อมูล
+app.post("/api/garmin/stop-mock/:memberId", verifyUser, async (req, res) => {
+  const { memberId } = req.params;
+  const currentUserId = req.user.id;
+
+  try {
+    await db.execute(
+      `UPDATE family_members 
+       SET heart_rate = '-', steps = '-', sleep = '-', status = 'ไม่มีข้อมูล', is_connected = 0
+       WHERE id = ? AND user_id = ?`,
+      [memberId, currentUserId]
+    );
+    return res.json({ message: "Mock data stopped" });
+  } catch (err) {
+    console.error("Stop Mock Error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ------------------------------------------
 // 7.1 ข้อมูลสุขภาพรายครั้ง (หน้า "ข้อมูลสุขภาพ")
 // ------------------------------------------
 
-// ดึงประวัติข้อมูลสุขภาพของสมาชิก แยกตามแท็บ (type) พร้อมแบ่งหน้า
-// เช่น /api/family-members/3/readings?type=heart_rate&page=1&limit=8
 app.get("/api/family-members/:memberId/readings", verifyUser, async (req, res) => {
   const { memberId } = req.params;
   const currentUserId = req.user.id;
@@ -566,7 +573,6 @@ app.get("/api/family-members/:memberId/readings", verifyUser, async (req, res) =
       "SELECT COUNT(*) AS total FROM health_readings WHERE member_id = ? AND type = ?",
       [memberId, type]
     );
-    // LIMIT/OFFSET ใช้ db.query เพราะ db.execute ไม่รองรับตัวเลขใน LIMIT (ตรวจค่าเป็นตัวเลขแล้วด้านบน)
     const [items] = await db.query(
       `SELECT id, value, source, recorded_at FROM health_readings
        WHERE member_id = ? AND type = ?
@@ -590,14 +596,12 @@ app.get("/api/family-members/:memberId/readings", verifyUser, async (req, res) =
 // ------------------------------------------
 // 7.2 รายงานสุขภาพ (หน้า "รายงาน")
 // ------------------------------------------
-const REPORT_PERIODS = [7, 30, 90]; // 7 วัน / 30 วัน / 3 เดือน
-const SLEEP_GOAL = 7; // เป้าหมายการนอน (ชม./คืน)
+const REPORT_PERIODS = [7, 30, 90];
+const SLEEP_GOAL = 7;
 
-// แปลง Date เป็น "YYYY-MM-DD" ตามเวลาเครื่อง (ไม่ใช้ toISOString เพราะเป็นเวลา UTC)
 const toDateKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// เช่น /api/family-members/3/report?days=30
 app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => {
   const { memberId } = req.params;
   const days = Number(req.query.days) || 30;
@@ -620,10 +624,9 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
     const today = startOfDay(new Date());
     const from = new Date(today);
     from.setDate(from.getDate() - (days - 1));
-    const prevFrom = new Date(from); // ช่วงก่อนหน้าที่ยาวเท่ากัน (ใช้เทียบก้าวเดิน)
+    const prevFrom = new Date(from);
     prevFrom.setDate(prevFrom.getDate() - days);
 
-    // ค่ารายวัน: ชีพจรเฉลี่ย/สูงสุด, ก้าวเดิน (ค่าสะสมสูงสุดของวัน = ยอดทั้งวัน), การนอน
     const [rows] = await db.execute(
       `SELECT DATE_FORMAT(recorded_at, '%Y-%m-%d') AS day, type,
               AVG(value) AS avg_value, MAX(value) AS max_value
@@ -646,7 +649,6 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
       }
     }
 
-    // เติมให้ครบทุกวันในช่วง (วันที่ไม่มีข้อมูลเป็น null กราฟจะเว้นช่องไว้)
     const daily = [];
     for (let d = new Date(from); d <= today; d.setDate(d.getDate() + 1)) {
       const key = toDateKey(d);
@@ -668,7 +670,6 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
     const avgSteps = average(daily.map((d) => d.steps));
     const avgSleep = average(daily.map((d) => d.sleep));
 
-    // ก้าวเฉลี่ยต่อวันของช่วงก่อนหน้า
     const [[prev]] = await db.execute(
       `SELECT AVG(daily_steps) AS avg_steps FROM (
          SELECT MAX(value) AS daily_steps FROM health_readings
@@ -679,7 +680,6 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
       [memberId, prevFrom, from]
     );
 
-    // ชีพจรสูงสุดรายครั้ง พร้อมเวลาที่วัดได้
     const [[maxHr]] = await db.execute(
       `SELECT value, recorded_at FROM health_readings
        WHERE member_id = ? AND type = 'heart_rate' AND value IS NOT NULL AND recorded_at >= ?
@@ -687,9 +687,6 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
       [memberId, from]
     );
 
-    // นับการแจ้งเตือนจากค่าที่ผิดปกติ (ยังไม่มีตารางเก็บประวัติการแจ้งเตือนจริง)
-    //   ฉุกเฉิน: ชีพจร > 120 หรือ < 50
-    //   ผิดปกติ: ชีพจร 101-120 หรือ 50-59, ความเครียด > 70
     const [[alerts]] = await db.execute(
       `SELECT
          SUM(type = 'heart_rate' AND (value > 120 OR value < 50)) AS emergency,
