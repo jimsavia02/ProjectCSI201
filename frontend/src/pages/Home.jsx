@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import api, { getErrorMessage } from '../api.js'
+import UserSupportChat from '../components/UserSupportChat.jsx'
 
 function Home() {
   const [user, setUser] = useState(null)
@@ -150,6 +151,9 @@ function Home() {
           <Outlet context={{ user, setUser, onLogout: handleLogout }} />
         </main>
       </div>
+
+      {/* ปุ่มแชทติดต่อเจ้าหน้าที่ มุมขวาล่าง (แสดงทุกหน้าของ user) */}
+      <UserSupportChat />
     </div>
   )
 }

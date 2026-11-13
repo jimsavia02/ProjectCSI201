@@ -69,3 +69,4 @@ UPDATE signup_login.users SET role = 'admin' WHERE email = 'อีเมลข�
 ## วิธีเมคข้อมูล
 
 npm run seed:health -- --member=10 --days=30
+ดูเลข member ใน phpadmin นะ

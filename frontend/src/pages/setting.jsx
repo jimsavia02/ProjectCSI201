@@ -1,22 +1,47 @@
-import { useEffect, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
-import { KeyRound } from 'lucide-react'
-import api, { getErrorMessage } from '../api.js'
+import { useEffect, useState } from "react";
+import { useOutletContext } from "react-router-dom";
+import { KeyRound } from "lucide-react";
+import api, { getErrorMessage } from "../api.js";
 
 // สวิตช์การแจ้งเตือน (ตอนนี้กดเปิด/ปิดได้อย่างเดียว ยังไม่ได้บันทึกและยังไม่ได้ส่งแจ้งเตือนจริง)
 const NOTIFICATION_OPTIONS = [
-  { key: 'app', label: 'แจ้งเตือนผ่านแอป', desc: 'รับการแจ้งเตือนทันที', defaultOn: true },
-  { key: 'sms', label: 'แจ้งเตือนผ่าน SMS', desc: 'เฉพาะเหตุฉุกเฉิน', defaultOn: true },
-  { key: 'email', label: 'อีเมลสรุปรายสัปดาห์', desc: 'สรุปสุขภาพสมาชิกทุกคน', defaultOn: false },
-  { key: 'share', label: 'แชร์ข้อมูลกับครอบครัว', desc: 'ให้สมาชิกที่เชิญดูข้อมูลได้', defaultOn: true },
-]
+  {
+    key: "app",
+    label: "แจ้งเตือนผ่านแอป",
+    desc: "รับการแจ้งเตือนทันที",
+    defaultOn: true,
+  },
+  {
+    key: "line",
+    label: "แจ้งเตือนผ่าน LINE",
+    desc: "เฉพาะเหตุฉุกเฉิน",
+    defaultOn: true,
+  },
+  {
+    key: "email",
+    label: "อีเมลสรุปรายสัปดาห์",
+    desc: "สรุปสุขภาพสมาชิกทุกคน",
+    defaultOn: false,
+  },
+  {
+    key: "share",
+    label: "แชร์ข้อมูลกับครอบครัว",
+    desc: "ให้สมาชิกที่เชิญดูข้อมูลได้",
+    defaultOn: true,
+  },
+];
 
-// ตัวอักษร 2 ตัวแรกของชื่อ ไว้แสดงในรูปโปรไฟล์ (ข้ามสระบน/ล่างและวรรณยุกต์ เช่น "อนุทิน" -> "อน")
-const initialsOf = (name = '') =>
-  [...name.replace(/[ัิ-ฺ็-๎\s]/g, '')].slice(0, 2).join('')
+// สระบน/ล่าง ( ั ิ ี ึ ื ุ ู ฺ ) และวรรณยุกต์/เครื่องหมาย ( ็ ่ ้ ๊ ๋ ์ ํ ๎ )
+// ตัวพวกนี้วางเดี่ยวๆ ไม่ได้ จึงต้องตัดออกก่อนเลือกตัวอักษรมาแสดง
+const THAI_MARKS = /[-]/g;
+const SPACES = /\s/g;
+
+// ตัวอักษร 2 ตัวแรกของชื่อ ไว้แสดงในรูปโปรไฟล์ เช่น "อนุทิน" -> "อน"
+const initialsOf = (name = "") =>
+  name.replace(THAI_MARKS, "").replace(SPACES, "").slice(0, 2);
 
 const inputClass =
-  'w-full rounded-[14px] border border-[#f1dce5] bg-[#fff5f8] px-4 py-3 text-[#3c3038] outline-none placeholder:text-[#b8a4ae] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]'
+  "w-full rounded-[14px] border border-[#f1dce5] bg-[#fff5f8] px-4 py-3 text-[#3c3038] outline-none placeholder:text-[#b8a4ae] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]";
 
 function Toggle({ checked, onChange, label }) {
   return (
@@ -27,27 +52,38 @@ function Toggle({ checked, onChange, label }) {
       aria-label={label}
       onClick={onChange}
       className={`relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors ${
-        checked ? 'bg-linear-to-r from-[#ff83ad] to-[#f34c8c]' : 'bg-[#ece3e7]'
+        checked ? "bg-linear-to-r from-[#ff83ad] to-[#f34c8c]" : "bg-[#ece3e7]"
       }`}
     >
       <span
         className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-5' : ''
+          checked ? "translate-x-5" : ""
         }`}
       />
     </button>
-  )
+  );
 }
 
-const EMPTY_PASSWORDS = { currentPassword: '', newPassword: '', confirmPassword: '' }
+const EMPTY_PASSWORDS = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: "",
+};
 
 // ช่องรหัสผ่าน พร้อมข้อความช่วยเหลือใต้ช่อง
-function PasswordInput({ id, label, hint, hintTone = 'muted', ...props }) {
-  const hintColor = { muted: 'text-[#9d8994]', ok: 'text-emerald-600', error: 'text-red-600' }[hintTone]
+function PasswordInput({ id, label, hint, hintTone = "muted", ...props }) {
+  const hintColor = {
+    muted: "text-[#9d8994]",
+    ok: "text-emerald-600",
+    error: "text-red-600",
+  }[hintTone];
 
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-semibold text-[#786671]">
+      <label
+        htmlFor={id}
+        className="mb-1.5 block text-sm font-semibold text-[#786671]"
+      >
         {label}
       </label>
       <input
@@ -64,49 +100,49 @@ function PasswordInput({ id, label, hint, hintTone = 'muted', ...props }) {
         </p>
       )}
     </div>
-  )
+  );
 }
 
-// popup เปลี่ยนรหัสผ่าน
-function ChangePasswordModal({ onClose, onSuccess }) {
-  const [values, setValues] = useState(EMPTY_PASSWORDS)
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
+// popup เปลี่ยนรหัสผ่าน (export ไว้ให้หน้าตั้งค่าของ admin ใช้ร่วมกัน)
+export function ChangePasswordModal({ onClose, onSuccess }) {
+  const [values, setValues] = useState(EMPTY_PASSWORDS);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // กด Esc เพื่อปิด popup
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && !saving && onClose()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, saving])
+    const onKey = (e) => e.key === "Escape" && !saving && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, saving]);
 
   const handleChange = (e) => {
-    setValues({ ...values, [e.target.name]: e.target.value })
-  }
+    setValues({ ...values, [e.target.name]: e.target.value });
+  };
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError('')
+    e.preventDefault();
+    setError("");
     if (values.newPassword !== values.confirmPassword) {
-      setError('รหัสผ่านใหม่และการยืนยันไม่ตรงกัน')
-      return
+      setError("รหัสผ่านใหม่และการยืนยันไม่ตรงกัน");
+      return;
     }
     if (values.newPassword === values.currentPassword) {
-      setError('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน')
-      return
+      setError("รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านปัจจุบัน");
+      return;
     }
-    setSaving(true)
+    setSaving(true);
     try {
-      const res = await api.put('/api/account/password', {
+      const res = await api.put("/api/account/password", {
         currentPassword: values.currentPassword,
         newPassword: values.newPassword,
-      })
-      onSuccess(res.data.message)
+      });
+      onSuccess(res.data.message);
     } catch (err) {
-      setError(getErrorMessage(err))
-      setSaving(false)
+      setError(getErrorMessage(err));
+      setSaving(false);
     }
-  }
+  };
 
   return (
     <div
@@ -121,13 +157,21 @@ function ChangePasswordModal({ onClose, onSuccess }) {
         aria-labelledby="change-password-title"
         className="w-full max-w-md rounded-[22px] border border-[#f1dce5] bg-white p-6 shadow-2xl shadow-pink-200/60 md:p-7"
       >
-        <h2 id="change-password-title" className="text-lg font-semibold text-[#3c3038]">
+        <h2
+          id="change-password-title"
+          className="text-lg font-semibold text-[#3c3038]"
+        >
           เปลี่ยนรหัสผ่าน
         </h2>
-        <p className="mt-1 text-sm text-[#8e7c87]">รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร</p>
+        <p className="mt-1 text-sm text-[#8e7c87]">
+          รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร
+        </p>
 
         {error && (
-          <p role="alert" className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p
+            role="alert"
+            className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
             {error}
           </p>
         )}
@@ -152,10 +196,10 @@ function ChangePasswordModal({ onClose, onSuccess }) {
             onChange={handleChange}
             hint={
               values.newPassword && values.newPassword.length >= 8
-                ? '✓ ความยาวเพียงพอ'
-                : 'ต้องมีอย่างน้อย 8 ตัวอักษร'
+                ? "✓ ความยาวเพียงพอ"
+                : "ต้องมีอย่างน้อย 8 ตัวอักษร"
             }
-            hintTone={values.newPassword.length >= 8 ? 'ok' : 'muted'}
+            hintTone={values.newPassword.length >= 8 ? "ok" : "muted"}
           />
           <PasswordInput
             id="confirmPassword"
@@ -168,11 +212,13 @@ function ChangePasswordModal({ onClose, onSuccess }) {
             hint={
               values.confirmPassword
                 ? values.confirmPassword === values.newPassword
-                  ? '✓ รหัสผ่านตรงกัน'
-                  : 'รหัสผ่านไม่ตรงกัน'
+                  ? "✓ รหัสผ่านตรงกัน"
+                  : "รหัสผ่านไม่ตรงกัน"
                 : undefined
             }
-            hintTone={values.confirmPassword === values.newPassword ? 'ok' : 'error'}
+            hintTone={
+              values.confirmPassword === values.newPassword ? "ok" : "error"
+            }
           />
         </div>
 
@@ -190,76 +236,82 @@ function ChangePasswordModal({ onClose, onSuccess }) {
             disabled={saving}
             className="flex-1 cursor-pointer rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] py-3 font-medium text-white shadow-md shadow-pink-200 transition hover:brightness-95 disabled:opacity-60"
           >
-            {saving ? 'กำลังบันทึก...' : 'เปลี่ยนรหัสผ่าน'}
+            {saving ? "กำลังบันทึก..." : "เปลี่ยนรหัสผ่าน"}
           </button>
         </div>
       </form>
     </div>
-  )
+  );
 }
 
 function Setting() {
-  const { setUser, onLogout } = useOutletContext()
-  const [values, setValues] = useState({ name: '', email: '', phone: '' })
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
-  const [savedName, setSavedName] = useState('') // ชื่อ/อีเมลที่บันทึกแล้ว ใช้แสดงบนการ์ดโปรไฟล์
-  const [savedEmail, setSavedEmail] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState({ type: '', text: '' })
+  const { setUser, onLogout } = useOutletContext();
+  const [values, setValues] = useState({ name: "", email: "", phone: "" });
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [savedName, setSavedName] = useState(""); // ชื่อ/อีเมลที่บันทึกแล้ว ใช้แสดงบนการ์ดโปรไฟล์
+  const [savedEmail, setSavedEmail] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState({ type: "", text: "" });
   const [notifications, setNotifications] = useState(
-    Object.fromEntries(NOTIFICATION_OPTIONS.map((o) => [o.key, o.defaultOn]))
-  )
+    Object.fromEntries(NOTIFICATION_OPTIONS.map((o) => [o.key, o.defaultOn])),
+  );
 
   // โหลดข้อมูลบัญชีปัจจุบันมาใส่ในฟอร์ม
   useEffect(() => {
-    api.get('/api/account')
+    api
+      .get("/api/account")
       .then((res) => {
-        const { name, email, phone } = res.data
-        setValues({ name, email, phone: phone || '' })
-        setSavedName(name)
-        setSavedEmail(email)
+        const { name, email, phone } = res.data;
+        setValues({ name, email, phone: phone || "" });
+        setSavedName(name);
+        setSavedEmail(email);
       })
-      .catch((err) => setMessage({ type: 'error', text: getErrorMessage(err) }))
-      .finally(() => setLoading(false))
-  }, [])
+      .catch((err) => setMessage({ type: "error", text: getErrorMessage(err) }))
+      .finally(() => setLoading(false));
+  }, []);
 
   const handleChange = (e) => {
-    setValues({ ...values, [e.target.name]: e.target.value })
-  }
+    setValues({ ...values, [e.target.name]: e.target.value });
+  };
 
   // เบอร์โทรมีตัวอักษรอื่นนอกจากตัวเลข -> แสดงคำเตือนและกดบันทึกไม่ได้
-  const phoneInvalid = /\D/.test(values.phone)
+  const phoneInvalid = /\D/.test(values.phone);
 
   const handleSave = async (e) => {
-    e.preventDefault()
-    setSaving(true)
-    setMessage({ type: '', text: '' })
+    e.preventDefault();
+    setSaving(true);
+    setMessage({ type: "", text: "" });
     try {
-      const res = await api.put('/api/account', values)
-      setSavedName(values.name.trim())
-      setSavedEmail(values.email.trim())
-      setUser((u) => ({ ...u, name: values.name.trim() })) // อัปเดตชื่อบนแถบด้านบนทันที
-      setMessage({ type: 'success', text: res.data.message })
+      const res = await api.put("/api/account", values);
+      setSavedName(values.name.trim());
+      setSavedEmail(values.email.trim());
+      setUser((u) => ({ ...u, name: values.name.trim() })); // อัปเดตชื่อบนแถบด้านบนทันที
+      setMessage({ type: "success", text: res.data.message });
     } catch (err) {
-      setMessage({ type: 'error', text: getErrorMessage(err) })
+      setMessage({ type: "error", text: getErrorMessage(err) });
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   if (loading) {
-    return <p className="text-sm text-[#8e7c87]">กำลังโหลดข้อมูล...</p>
+    return <p className="text-sm text-[#8e7c87]">กำลังโหลดข้อมูล...</p>;
   }
 
   return (
     <section className="text-[#3c3038]">
       <h1 className="text-3xl font-semibold">ตั้งค่า</h1>
-      <p className="mt-1.5 text-[#8e7c87]">จัดการบัญชี การแจ้งเตือน และความเป็นส่วนตัว</p>
+      <p className="mt-1.5 text-[#8e7c87]">
+        จัดการบัญชี การแจ้งเตือน และความเป็นส่วนตัว
+      </p>
 
       <div className="mt-7 grid gap-6 lg:grid-cols-2">
         {/* การ์ดซ้าย: ข้อมูลบัญชี */}
-        <form onSubmit={handleSave} className="rounded-[22px] border border-[#f1dce5] bg-white p-6 md:p-7">
+        <form
+          onSubmit={handleSave}
+          className="rounded-[22px] border border-[#f1dce5] bg-white p-6 md:p-7"
+        >
           <h2 className="text-lg font-semibold">ข้อมูลบัญชี</h2>
 
           <div className="mt-5 flex items-center gap-4">
@@ -274,9 +326,11 @@ function Setting() {
 
           {message.text && (
             <p
-              role={message.type === 'error' ? 'alert' : 'status'}
+              role={message.type === "error" ? "alert" : "status"}
               className={`mt-5 rounded-xl px-4 py-3 text-sm ${
-                message.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
+                message.type === "error"
+                  ? "bg-red-50 text-red-700"
+                  : "bg-emerald-50 text-emerald-700"
               }`}
             >
               {message.text}
@@ -285,19 +339,44 @@ function Setting() {
 
           <div className="mt-5 space-y-4">
             <div>
-              <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+              <label
+                htmlFor="name"
+                className="mb-1.5 block text-sm font-semibold text-[#786671]"
+              >
                 ชื่อ - นามสกุล
               </label>
-              <input id="name" name="name" required maxLength={100} value={values.name} onChange={handleChange} className={inputClass} />
+              <input
+                id="name"
+                name="name"
+                required
+                maxLength={100}
+                value={values.name}
+                onChange={handleChange}
+                className={inputClass}
+              />
             </div>
             <div>
-              <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+              <label
+                htmlFor="email"
+                className="mb-1.5 block text-sm font-semibold text-[#786671]"
+              >
                 อีเมล
               </label>
-              <input id="email" name="email" type="email" required value={values.email} onChange={handleChange} className={inputClass} />
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                value={values.email}
+                onChange={handleChange}
+                className={inputClass}
+              />
             </div>
             <div>
-              <label htmlFor="phone" className="mb-1.5 block text-sm font-semibold text-[#786671]">
+              <label
+                htmlFor="phone"
+                className="mb-1.5 block text-sm font-semibold text-[#786671]"
+              >
                 เบอร์โทรศัพท์
               </label>
               <input
@@ -310,8 +389,8 @@ function Setting() {
                 value={values.phone}
                 onChange={handleChange}
                 aria-invalid={phoneInvalid}
-                aria-describedby={phoneInvalid ? 'phone-warning' : undefined}
-                className={`${inputClass} ${phoneInvalid ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : ''}`}
+                aria-describedby={phoneInvalid ? "phone-warning" : undefined}
+                className={`${inputClass} ${phoneInvalid ? "border-red-400 focus:border-red-400 focus:ring-red-100" : ""}`}
               />
               {phoneInvalid && (
                 <p id="phone-warning" className="mt-1.5 text-sm text-red-600">
@@ -326,7 +405,7 @@ function Setting() {
             disabled={saving || phoneInvalid}
             className="mt-7 cursor-pointer disabled:cursor-not-allowed rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] px-10 py-3 font-medium text-white shadow-md shadow-pink-200 transition hover:brightness-95 disabled:opacity-60"
           >
-            {saving ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
+            {saving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}
           </button>
 
           {/* ส่วนความปลอดภัย: แยกการเปลี่ยนรหัสผ่านออกจากฟอร์มข้อมูลบัญชี */}
@@ -339,14 +418,16 @@ function Setting() {
                 </span>
                 <div>
                   <p className="font-semibold">รหัสผ่าน</p>
-                  <p className="text-xs text-[#9d8994]">ควรใช้รหัสผ่านที่คาดเดายากอย่างน้อย 8 ตัวอักษร</p>
+                  <p className="text-xs text-[#9d8994]">
+                    ควรใช้รหัสผ่านที่คาดเดายากอย่างน้อย 8 ตัวอักษร
+                  </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  setMessage({ type: '', text: '' })
-                  setIsPasswordModalOpen(true)
+                  setMessage({ type: "", text: "" });
+                  setIsPasswordModalOpen(true);
                 }}
                 className="cursor-pointer rounded-[12px] border border-[#f1dce5] bg-white px-4 py-2 text-sm font-semibold text-[#f05289] transition hover:border-[#f66c9c] hover:bg-[#fff5f8]"
               >
@@ -360,19 +441,24 @@ function Setting() {
           <ChangePasswordModal
             onClose={() => setIsPasswordModalOpen(false)}
             onSuccess={(text) => {
-              setIsPasswordModalOpen(false)
-              setMessage({ type: 'success', text })
+              setIsPasswordModalOpen(false);
+              setMessage({ type: "success", text });
             }}
           />
         )}
 
         {/* การ์ดขวา: การแจ้งเตือน & ความเป็นส่วนตัว */}
         <div className="flex flex-col rounded-[22px] border border-[#f1dce5] bg-white p-6 md:p-7">
-          <h2 className="text-lg font-semibold">การแจ้งเตือน &amp; ความเป็นส่วนตัว</h2>
+          <h2 className="text-lg font-semibold">
+            การแจ้งเตือน &amp; ความเป็นส่วนตัว
+          </h2>
 
           <ul className="mt-3">
             {NOTIFICATION_OPTIONS.map((option) => (
-              <li key={option.key} className="flex items-center justify-between gap-4 border-b border-[#f6e6ed] py-4">
+              <li
+                key={option.key}
+                className="flex items-center justify-between gap-4 border-b border-[#f6e6ed] py-4"
+              >
                 <div>
                   <p className="font-semibold">{option.label}</p>
                   <p className="text-xs text-[#9d8994]">{option.desc}</p>
@@ -380,21 +466,22 @@ function Setting() {
                 <Toggle
                   label={option.label}
                   checked={notifications[option.key]}
-                  onChange={() => setNotifications({ ...notifications, [option.key]: !notifications[option.key] })}
+                  onChange={() =>
+                    setNotifications({
+                      ...notifications,
+                      [option.key]: !notifications[option.key],
+                    })
+                  }
                 />
               </li>
             ))}
           </ul>
 
-          {/* ภาษาและธีม: ตอนนี้มีให้เลือกอย่างเดียว จึงแสดงเป็นข้อความ */}
+          {/* ภาษา: ตอนนี้มีให้เลือกอย่างเดียว จึงแสดงเป็นข้อความ */}
           <dl className="mt-3">
-            <div className="flex items-center justify-between border-b border-[#f6e6ed] py-4">
+            <div className="flex items-center justify-between py-4">
               <dt className="font-semibold">ภาษา</dt>
               <dd className="text-[#f05289]">ไทย</dd>
-            </div>
-            <div className="flex items-center justify-between py-4">
-              <dt className="font-semibold">ธีม</dt>
-              <dd className="text-[#f05289]">ชมพู</dd>
             </div>
           </dl>
 
@@ -410,7 +497,7 @@ function Setting() {
         </div>
       </div>
     </section>
-  )
+  );
 }
 
-export default Setting
+export default Setting;

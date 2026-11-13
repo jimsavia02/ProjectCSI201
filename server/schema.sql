@@ -64,3 +64,16 @@ CREATE TABLE IF NOT EXISTS health_readings (
   FOREIGN KEY (member_id) REFERENCES family_members(id) ON DELETE CASCADE,
   INDEX idx_member_type_time (member_id, type, recorded_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 5. ตาราง support_messages (แชทซัพพอร์ตระหว่างผู้ใช้กับ admin)
+CREATE TABLE IF NOT EXISTS support_messages (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,                -- ห้องแชทของผู้ใช้คนไหน (1 ผู้ใช้ = 1 ห้องแชทกับ admin)
+  sender_role VARCHAR(20) NOT NULL,    -- 'user' = ผู้ใช้ส่ง | 'admin' = เจ้าหน้าที่ตอบ
+  sender_id INT DEFAULT NULL,          -- id ของคนที่ส่ง (admin คนไหนตอบ)
+  message TEXT NOT NULL,
+  is_read TINYINT(1) DEFAULT 0,        -- อีกฝั่งเปิดอ่านแล้วหรือยัง (ใช้ทำจุดแดงแจ้งเตือน)
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_user_time (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

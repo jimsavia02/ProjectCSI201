@@ -88,7 +88,23 @@ const verifyUser = (req, res, next) => {
   }
 };
 
-const PHONE_ERROR = "เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น และไม่เกิน 10 หลัก";
+// ใช้ต่อจาก verifyUser: อนุญาตเฉพาะบัญชีที่ role = 'admin'
+// เช็ก role จากฐานข้อมูลทุกครั้ง (ไม่เชื่อ role ใน JWT อย่างเดียว)
+// เพื่อให้ admin ที่ถูกลดสิทธิ์/ถูกลบ ใช้งานต่อไม่ได้ทันที ไม่ต้องรอ token หมดอายุ
+const verifyAdmin = async (req, res, next) => {
+  try {
+    const [[row]] = await db.execute("SELECT role FROM users WHERE id = ?", [req.user?.id]);
+    if (row?.role !== "admin") {
+      return res.status(403).json({ error: "เฉพาะผู้ดูแลระบบเท่านั้น" });
+    }
+    next();
+  } catch (err) {
+    console.error("Verify admin error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+const PHONE_ERROR ="เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น และไม่เกิน 10 หลัก";
 const isValidPhone = (phone) => {
   if (phone == null || phone === "") return true;
   return typeof phone === "string" && /^\d{1,10}$/.test(phone.trim());
@@ -725,7 +741,409 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
 });
 
 // ------------------------------------------
-// 8. Start Server
+// 7.3 แชทซัพพอร์ต ฝั่งผู้ใช้ (1 ผู้ใช้ = 1 ห้องแชทกับเจ้าหน้าที่)
+// ------------------------------------------
+const MAX_MESSAGE_LENGTH = 1000;
+
+const MESSAGE_COLUMNS = "id, sender_role, message, is_read, created_at";
+
+// ข้อความทั้งหมดในห้องแชทของตัวเอง + ทำเครื่องหมายว่าอ่านคำตอบจาก admin แล้ว
+app.get("/api/support/messages", verifyUser, async (req, res) => {
+  try {
+    await db.execute(
+      "UPDATE support_messages SET is_read = 1 WHERE user_id = ? AND sender_role = 'admin' AND is_read = 0",
+      [req.user.id]
+    );
+    const [rows] = await db.execute(
+      `SELECT ${MESSAGE_COLUMNS} FROM support_messages WHERE user_id = ? ORDER BY created_at, id`,
+      [req.user.id]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error("Fetch support messages error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อความได้" });
+  }
+});
+
+// ผู้ใช้ส่งข้อความหาเจ้าหน้าที่
+app.post("/api/support/messages", verifyUser, async (req, res) => {
+  const message = req.body?.message?.trim();
+  if (!message) {
+    return res.status(400).json({ error: "กรุณาพิมพ์ข้อความ" });
+  }
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({ error: `ข้อความยาวได้ไม่เกิน ${MAX_MESSAGE_LENGTH} ตัวอักษร` });
+  }
+  try {
+    await db.execute(
+      "INSERT INTO support_messages (user_id, sender_role, sender_id, message) VALUES (?, 'user', ?, ?)",
+      [req.user.id, req.user.id, message]
+    );
+    return res.status(201).json({ message: "ส่งข้อความแล้ว" });
+  } catch (err) {
+    console.error("Send support message error:", err);
+    return res.status(500).json({ error: "ไม่สามารถส่งข้อความได้" });
+  }
+});
+
+// ------------------------------------------
+// 8. Admin APIs (ต้องล็อกอินเป็น admin)
+// ------------------------------------------
+const THAI_DAYS = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
+
+// สถิติหน้าภาพรวม admin: ผู้ใช้ทั้งหมด + ผู้สมัครใหม่รายวันย้อนหลัง 7 วัน (รวมวันนี้)
+app.get("/admin/dashboard-stats", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const [[{ totalUsers }]] = await db.execute(
+      "SELECT COUNT(*) AS totalUsers FROM users WHERE role = 'user'"
+    );
+
+    // นาฬิกาที่เชื่อมต่อแล้ว เทียบกับสมาชิกครอบครัวทั้งหมดในระบบ
+    const [[devices]] = await db.execute(
+      "SELECT COUNT(*) AS totalMembers, COALESCE(SUM(is_connected = 1), 0) AS connectedDevices FROM family_members"
+    );
+
+    const today = startOfDay(new Date());
+    const from = new Date(today);
+    from.setDate(from.getDate() - 6);
+
+    const [rows] = await db.execute(
+      `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COUNT(*) AS count
+       FROM users
+       WHERE role = 'user' AND created_at >= ?
+       GROUP BY day`,
+      [from]
+    );
+    const countByDay = Object.fromEntries(rows.map((r) => [r.day, Number(r.count)]));
+
+    // ใส่ให้ครบ 7 วัน วันที่ไม่มีคนสมัครเป็น 0
+    const weeklyData = [];
+    for (let d = new Date(from); d <= today; d.setDate(d.getDate() + 1)) {
+      const key = toDateKey(d);
+      weeklyData.push({ date: key, day: THAI_DAYS[d.getDay()], count: countByDay[key] ?? 0 });
+    }
+
+    return res.json({
+      totalUsers: Number(totalUsers),
+      totalMembers: Number(devices.totalMembers),
+      connectedDevices: Number(devices.connectedDevices),
+      weeklyGrowth: weeklyData.reduce((sum, d) => sum + d.count, 0),
+      weeklyData,
+    });
+  } catch (err) {
+    console.error("Admin dashboard stats error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลสถิติได้" });
+  }
+});
+
+// ---------- หน้า "ผู้ใช้งาน" ของ admin ----------
+
+// รายชื่อผู้ใช้ทั้งหมด (รวม admin) พร้อมจำนวนสมาชิกครอบครัว และจำนวนนาฬิกาที่เชื่อมต่อ
+app.get("/admin/users", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT u.id, u.name, u.email, u.phone, u.role, u.created_at,
+              COUNT(f.id) AS member_count,
+              COALESCE(SUM(f.is_connected = 1), 0) AS connected_count
+       FROM users u
+       LEFT JOIN family_members f ON f.user_id = u.id
+       GROUP BY u.id
+       ORDER BY u.created_at DESC`
+    );
+    return res.json(
+      rows.map((r) => ({
+        ...r,
+        member_count: Number(r.member_count),
+        connected_count: Number(r.connected_count),
+      }))
+    );
+  } catch (err) {
+    console.error("Admin list users error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงรายชื่อผู้ใช้ได้" });
+  }
+});
+
+// รายละเอียดผู้ใช้ 1 คน + สมาชิกครอบครัวของผู้ใช้คนนั้น
+app.get("/admin/users/:id", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const [[user]] = await db.execute(
+      "SELECT id, name, email, phone, role, created_at FROM users WHERE id = ?",
+      [req.params.id]
+    );
+    if (!user) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    const [members] = await db.execute(
+      `SELECT id, name, relation, device, heart_rate, steps, sleep, status, is_connected, last_synced_at
+       FROM family_members WHERE user_id = ? ORDER BY id DESC`,
+      [req.params.id]
+    );
+    return res.json({ user, members });
+  } catch (err) {
+    console.error("Admin user detail error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลผู้ใช้ได้" });
+  }
+});
+
+// เปลี่ยน role ของผู้ใช้ (user <-> admin) ห้ามเปลี่ยนของตัวเอง กันล็อกตัวเองออกจากระบบ
+app.put("/admin/users/:id/role", verifyUser, verifyAdmin, async (req, res) => {
+  const { role } = req.body ?? {};
+  if (!["user", "admin"].includes(role)) {
+    return res.status(400).json({ error: "role ไม่ถูกต้อง" });
+  }
+  if (Number(req.params.id) === req.user.id) {
+    return res.status(400).json({ error: "ไม่สามารถเปลี่ยน role ของตัวเองได้" });
+  }
+  try {
+    const [result] = await db.execute("UPDATE users SET role = ? WHERE id = ?", [role, req.params.id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    return res.json({ message: "เปลี่ยน role เรียบร้อยแล้ว" });
+  } catch (err) {
+    console.error("Admin change role error:", err);
+    return res.status(500).json({ error: "ไม่สามารถเปลี่ยน role ได้" });
+  }
+});
+
+// ลบบัญชีผู้ใช้ (สมาชิกครอบครัว ข้อมูลสุขภาพ และนัดหมายถูกลบตามด้วย ON DELETE CASCADE)
+// ห้ามลบบัญชีตัวเอง
+app.delete("/admin/users/:id", verifyUser, verifyAdmin, async (req, res) => {
+  if (Number(req.params.id) === req.user.id) {
+    return res.status(400).json({ error: "ไม่สามารถลบบัญชีของตัวเองได้" });
+  }
+  try {
+    const [result] = await db.execute("DELETE FROM users WHERE id = ?", [req.params.id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    return res.json({ message: "ลบบัญชีผู้ใช้เรียบร้อยแล้ว" });
+  } catch (err) {
+    console.error("Admin delete user error:", err);
+    return res.status(500).json({ error: "ไม่สามารถลบบัญชีผู้ใช้ได้" });
+  }
+});
+
+// ---------- หน้า "อุปกรณ์" ของ admin ----------
+const STALE_SYNC_HOURS = 24; // เชื่อมต่อแล้วแต่ไม่ได้ซิงค์เกินกี่ชั่วโมง ถือว่า "ขาดการซิงค์"
+
+// นาฬิกาของสมาชิกครอบครัวทุกคนในระบบ พร้อมเจ้าของบัญชี และสถานะการเชื่อมต่อ
+//   online        = เชื่อมต่อแล้ว และซิงค์ภายใน 24 ชม.
+//   stale         = เชื่อมต่อแล้ว แต่ไม่ได้ซิงค์เกิน 24 ชม. (หรือยังไม่เคยซิงค์)
+//   not_connected = ยังไม่ได้เชื่อมต่อ
+app.get("/admin/devices", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT f.id, f.name, f.relation, f.device, f.is_connected, f.last_synced_at,
+              f.status, f.heart_rate,
+              u.id AS owner_id, u.name AS owner_name, u.email AS owner_email
+       FROM family_members f
+       JOIN users u ON u.id = f.user_id
+       ORDER BY f.is_connected DESC, f.last_synced_at DESC`
+    );
+
+    const staleBefore = Date.now() - STALE_SYNC_HOURS * 60 * 60 * 1000;
+    const devices = rows.map((r) => {
+      let connection = "not_connected";
+      if (r.is_connected) {
+        const synced = r.last_synced_at ? new Date(r.last_synced_at).getTime() : 0;
+        connection = synced >= staleBefore ? "online" : "stale";
+      }
+      return { ...r, is_connected: Boolean(r.is_connected), connection };
+    });
+
+    return res.json({ staleHours: STALE_SYNC_HOURS, devices });
+  } catch (err) {
+    console.error("Admin devices error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลอุปกรณ์ได้" });
+  }
+});
+
+// ---------- หน้า "รายงาน" ของ admin (ภาพรวมทั้งระบบ) ----------
+// เกณฑ์แจ้งเตือน (ใช้เกณฑ์เดียวกับหน้ารายงานฝั่งผู้ใช้)
+//   ฉุกเฉิน = ชีพจร > 120 หรือ < 50
+//   เตือน   = ชีพจร 101-120 หรือ 50-59, หรือความเครียด > 70
+// p = ชื่อตารางนำหน้าคอลัมน์ (เช่น "r.") ใช้ตอน JOIN หลายตาราง
+const emergencySql = (p = "") => `(${p}type = 'heart_rate' AND (${p}value > 120 OR ${p}value < 50))`;
+const warningSql = (p = "") =>
+  `((${p}type = 'heart_rate' AND ((${p}value > 100 AND ${p}value <= 120) OR (${p}value >= 50 AND ${p}value < 60))) OR (${p}type = 'stress' AND ${p}value > 70))`;
+
+app.get("/admin/report", verifyUser, verifyAdmin, async (req, res) => {
+  const days = Number(req.query.days) || 30;
+  if (!REPORT_PERIODS.includes(days)) {
+    return res.status(400).json({ error: "ช่วงเวลาไม่ถูกต้อง" });
+  }
+
+  try {
+    const today = startOfDay(new Date());
+    const from = new Date(today);
+    from.setDate(from.getDate() - (days - 1));
+
+    // 1) จำนวนการแจ้งเตือนรายวัน (ทั้งระบบ)
+    const [alertRows] = await db.execute(
+      `SELECT DATE_FORMAT(recorded_at, '%Y-%m-%d') AS day,
+              SUM(${emergencySql()}) AS emergency, SUM(${warningSql()}) AS warning
+       FROM health_readings
+       WHERE recorded_at >= ? AND value IS NOT NULL
+       GROUP BY day`,
+      [from]
+    );
+
+    // 2) ผู้ใช้ใหม่ / สมาชิกครอบครัวใหม่ รายวัน
+    const [userRows] = await db.execute(
+      `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COUNT(*) AS count
+       FROM users WHERE role = 'user' AND created_at >= ? GROUP BY day`,
+      [from]
+    );
+    const [memberRows] = await db.execute(
+      `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COUNT(*) AS count
+       FROM family_members WHERE created_at >= ? GROUP BY day`,
+      [from]
+    );
+
+    // รวมทุกอย่างเข้าตารางรายวัน (วันที่ไม่มีข้อมูล = 0)
+    const byDay = {};
+    const dayOf = (key) => (byDay[key] ??= {});
+    for (const r of alertRows) Object.assign(dayOf(r.day), { emergency: Number(r.emergency), warning: Number(r.warning) });
+    for (const r of userRows) dayOf(r.day).new_users = Number(r.count);
+    for (const r of memberRows) dayOf(r.day).new_members = Number(r.count);
+
+    const daily = [];
+    for (let d = new Date(from); d <= today; d.setDate(d.getDate() + 1)) {
+      const key = toDateKey(d);
+      const v = byDay[key] ?? {};
+      daily.push({
+        date: key,
+        emergency: v.emergency ?? 0,
+        warning: v.warning ?? 0,
+        new_users: v.new_users ?? 0,
+        new_members: v.new_members ?? 0,
+      });
+    }
+
+    const sum = (field) => daily.reduce((s, d) => s + d[field], 0);
+    // 3) สมาชิกที่ถูกแจ้งเตือนบ่อยที่สุด 5 อันดับ
+    const [topMembers] = await db.execute(
+      `SELECT f.id, f.name, f.relation, u.name AS owner_name,
+              SUM(${emergencySql("r.")}) AS emergency,
+              SUM(${warningSql("r.")}) AS warning
+       FROM health_readings r
+       JOIN family_members f ON f.id = r.member_id
+       JOIN users u ON u.id = f.user_id
+       WHERE r.recorded_at >= ? AND r.value IS NOT NULL
+       GROUP BY f.id
+       HAVING emergency + warning > 0
+       ORDER BY emergency DESC, warning DESC
+       LIMIT 5`,
+      [from]
+    );
+
+    return res.json({
+      days,
+      from: toDateKey(from),
+      to: toDateKey(today),
+      daily,
+      summary: {
+        emergency: sum("emergency"),
+        warning: sum("warning"),
+        new_users: sum("new_users"),
+        new_members: sum("new_members"),
+      },
+      topMembers: topMembers.map((m) => ({ ...m, emergency: Number(m.emergency), warning: Number(m.warning) })),
+    });
+  } catch (err) {
+    console.error("Admin report error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลรายงานได้" });
+  }
+});
+
+// ---------- หน้า "ซัพพอร์ต" ของ admin (แชทกับผู้ใช้) ----------
+
+// จำนวนข้อความจากผู้ใช้ที่ admin ยังไม่ได้อ่าน (ใช้ทำจุดแดงบนเมนู)
+app.get("/admin/support/unread-count", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const [[{ unread }]] = await db.execute(
+      "SELECT COUNT(*) AS unread FROM support_messages WHERE sender_role = 'user' AND is_read = 0"
+    );
+    return res.json({ unread: Number(unread) });
+  } catch (err) {
+    console.error("Support unread count error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// รายการห้องแชททั้งหมด: ผู้ใช้ที่เคยส่งข้อความ + ข้อความล่าสุด + จำนวนที่ยังไม่อ่าน
+app.get("/admin/support/conversations", verifyUser, verifyAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT u.id AS user_id, u.name, u.email,
+              last.message AS last_message, last.sender_role AS last_sender, last.created_at AS last_at,
+              (SELECT COUNT(*) FROM support_messages s
+                WHERE s.user_id = u.id AND s.sender_role = 'user' AND s.is_read = 0) AS unread
+       FROM users u
+       JOIN support_messages last ON last.id = (
+         SELECT id FROM support_messages WHERE user_id = u.id ORDER BY created_at DESC, id DESC LIMIT 1
+       )
+       ORDER BY last.created_at DESC, last.id DESC`
+    );
+    return res.json(rows.map((r) => ({ ...r, unread: Number(r.unread) })));
+  } catch (err) {
+    console.error("Support conversations error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงรายการแชทได้" });
+  }
+});
+
+// ข้อความในห้องแชทของผู้ใช้ 1 คน + ทำเครื่องหมายว่า admin อ่านแล้ว
+app.get("/admin/support/conversations/:userId", verifyUser, verifyAdmin, async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const [[user]] = await db.execute("SELECT id, name, email FROM users WHERE id = ?", [userId]);
+    if (!user) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    await db.execute(
+      "UPDATE support_messages SET is_read = 1 WHERE user_id = ? AND sender_role = 'user' AND is_read = 0",
+      [userId]
+    );
+    const [messages] = await db.execute(
+      `SELECT ${MESSAGE_COLUMNS} FROM support_messages WHERE user_id = ? ORDER BY created_at, id`,
+      [userId]
+    );
+    return res.json({ user, messages });
+  } catch (err) {
+    console.error("Support conversation error:", err);
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อความได้" });
+  }
+});
+
+// admin ตอบกลับผู้ใช้
+app.post("/admin/support/conversations/:userId", verifyUser, verifyAdmin, async (req, res) => {
+  const { userId } = req.params;
+  const message = req.body?.message?.trim();
+  if (!message) {
+    return res.status(400).json({ error: "กรุณาพิมพ์ข้อความ" });
+  }
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({ error: `ข้อความยาวได้ไม่เกิน ${MAX_MESSAGE_LENGTH} ตัวอักษร` });
+  }
+  try {
+    const [[user]] = await db.execute("SELECT id FROM users WHERE id = ?", [userId]);
+    if (!user) {
+      return res.status(404).json({ error: "ไม่พบผู้ใช้" });
+    }
+    await db.execute(
+      "INSERT INTO support_messages (user_id, sender_role, sender_id, message) VALUES (?, 'admin', ?, ?)",
+      [userId, req.user.id, message]
+    );
+    return res.status(201).json({ message: "ส่งข้อความแล้ว" });
+  } catch (err) {
+    console.error("Admin reply error:", err);
+    return res.status(500).json({ error: "ไม่สามารถส่งข้อความได้" });
+  }
+});
+
+// ------------------------------------------
+// 9. Start Server
 // ------------------------------------------
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);

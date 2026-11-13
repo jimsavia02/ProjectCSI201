@@ -8,10 +8,14 @@ import Data from './pages/data.jsx'
 import Report from './pages/report.jsx'
 import Party from './pages/party.jsx'
 import Setting from './pages/setting.jsx'
-import Appointments from './pages/Appointments.jsx' // 1. เพิ่ม Import ตรงนี้
+import Appointments from './pages/Appointments.jsx'
 
-import AdminHome from './pages/adminHome.jsx'
-import AdminDashboard from './pages/AdminDashboard.jsx'
+import AdminHome from './pages/admin/adminHome.jsx'
+import AdminDashboard from './pages/admin/AdminDashboard.jsx'
+import AdminUsers from './pages/admin/AdminUsers.jsx'
+import AdminDevices from './pages/admin/AdminDevices.jsx'
+import AdminReports from './pages/admin/AdminReports.jsx'
+import AdminSettings from './pages/admin/AdminSettings.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 
 function App() {
@@ -49,6 +53,10 @@ function App() {
         >
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="devices" element={<AdminDevices />} />
+          <Route path="reports" element={<AdminReports />} />
+          <Route path="settings" element={<AdminSettings />} />
         </Route>
 
         {/* === หน้า PUBLIC === */}

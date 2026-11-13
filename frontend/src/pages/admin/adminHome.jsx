@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import api, { getErrorMessage } from '../api.js'
+import api, { getErrorMessage } from '../../api.js'
+import AdminSupportChat from '../../components/AdminSupportChat.jsx'
 
 function AdminHome() {
   const [adminUser, setAdminUser] = useState(null)
@@ -35,15 +36,6 @@ function AdminHome() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
           <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
           <line x1="12" y1="18" x2="12.01" y2="18" />
-        </svg>
-      ),
-    },
-    {
-      to: '/admin/support',
-      label: 'ซัพพอร์ต',
-      icon: (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
-          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
         </svg>
       ),
     },
@@ -121,7 +113,7 @@ function AdminHome() {
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <aside className="w-60 shrink-0 border-r border-pink-100 bg-pink-50 px-5 py-6 text-slate-600">
+      <aside className="w-60 shrink-0 border-r border-pink-100 bg-pink-50 px-5 py-6 text-slate-600 print:hidden">
         <div className="mb-8 flex items-center gap-3 px-1">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-pink-500 text-white shadow-xs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6" aria-hidden="true">
@@ -153,7 +145,7 @@ function AdminHome() {
       </aside>
 
       <div className="min-w-0 flex-1 px-8 py-8">
-        <header className="mb-8 flex items-start justify-between">
+        <header className="mb-8 flex items-start justify-between print:hidden">
           <div>
             <h1 className="text-3xl font-bold text-slate-800">แดชบอร์ดผู้ดูแลระบบ</h1>
             <p className="mt-1 text-sm text-slate-500">ภาพรวมของระบบ Smart Watch Care ทั้งหมด</p>
@@ -173,8 +165,13 @@ function AdminHome() {
         </header>
 
         <main>
-          <Outlet context={{ adminUser }} />
+          <Outlet context={{ adminUser, setAdminUser }} />
         </main>
+      </div>
+
+      {/* ปุ่มแชทซัพพอร์ต มุมขวาล่าง + จุดแดงเมื่อมีข้อความใหม่ (แสดงทุกหน้าของ admin) */}
+      <div className="print:hidden">
+        <AdminSupportChat />
       </div>
     </div>
   )

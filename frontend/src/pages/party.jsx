@@ -516,7 +516,7 @@ export default function Party2() {
       </div>
 
       {/* Member Cards List */}
-      <div className="space-y-4 w-full">
+      <div className="space-y-3 w-full">
         {members.map((member) => {
           const displayName = member.name && String(member.name).trim() !== '' ? member.name : 'สมาชิกใหม่';
           const avatarLetter = member.avatar_text || member.avatarText || (displayName !== 'สมาชิกใหม่' ? displayName.charAt(0) : 'U');
@@ -524,21 +524,30 @@ export default function Party2() {
           return (
             <div 
               key={member.id} 
-              className={`bg-white border rounded-[28px] p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between transition w-full gap-4 hover:border-pink-200 ${
+              className={`relative bg-white border rounded-2xl px-4 py-3.5 shadow-sm flex flex-col lg:flex-row items-start lg:items-end justify-between transition w-full gap-3 hover:border-pink-200 ${
                 member.status === 'อันตราย' ? 'border-rose-300 bg-rose-50/20' : 'border-slate-100'
               }`}
             >
-              <div className="flex items-center gap-6">
-                <div className="w-16 h-16 bg-pink-100/60 rounded-2xl flex items-center justify-center text-pink-500 font-extrabold text-xl shrink-0 shadow-inner">
+              {/* ปุ่มดูรายละเอียด: มุมขวาบนของการ์ด */}
+              <button
+                onClick={() => handleOpenDetailModal(member)}
+                className="absolute top-3 right-4 bg-pink-50 hover:bg-pink-100 text-pink-500 text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" /> ดูรายละเอียด
+              </button>
+
+              <div className="flex items-center gap-4 flex-1 min-w-0 pr-32">
+                <div className="w-12 h-12 bg-pink-100/60 rounded-xl flex items-center justify-center text-pink-500 font-extrabold text-lg shrink-0 shadow-inner">
                   {avatarLetter}
                 </div>
 
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-slate-800 text-lg">{displayName}</h3>
-                    <span className="bg-pink-50 text-pink-500 text-xs px-2.5 py-0.5 rounded-full font-medium">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-slate-800 text-base">{displayName}</h3>
+                    <span className="bg-pink-50 text-pink-500 text-xs px-2.5 py-0.5 rounded-full font-medium whitespace-nowrap">
                       {member.relation || 'สมาชิก'}
                     </span>
+                    {renderStatusBadge(member.status)}
                   </div>
 
                   <p className="text-xs text-slate-400 mt-0.5 font-light">
@@ -548,7 +557,7 @@ export default function Party2() {
                   </p>
 
                   {hasHealthData(member) ? (
-                    <div className="flex gap-2 mt-3 flex-wrap">
+                    <div className="flex gap-2 mt-2 flex-wrap">
                       <span className="bg-rose-50 text-rose-500 text-xs px-3 py-1 rounded-xl flex items-center gap-1.5 font-semibold">
                         <Heart className="w-3.5 h-3.5 fill-rose-500" /> {member.heart_rate || member.heartRate || '-'}
                       </span>
@@ -560,29 +569,21 @@ export default function Party2() {
                       </span>
                     </div>
                   ) : (
-                    <div className="flex gap-2 mt-3">
-                      <span className="bg-slate-100 text-slate-400 text-xs px-3.5 py-1 rounded-full flex items-center gap-1.5 font-medium">
-                        <Watch className="w-3.5 h-3.5" /> ไม่มีข้อมูล · {noDataReason(member)}
+                    <div className="flex gap-2 mt-2">
+                      <span className="bg-slate-100 text-slate-400 text-xs px-3 py-1 rounded-full flex items-center gap-1.5 font-medium whitespace-nowrap">
+                        <Watch className="w-3.5 h-3.5 shrink-0" /> ไม่มีข้อมูล · {noDataReason(member)}
                       </span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex flex-col items-end gap-3 shrink-0 w-full md:w-auto">
-                {renderStatusBadge(member.status)}
+              <div className="flex flex-col items-end gap-2 shrink-0 w-full lg:w-auto">
 
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <button 
-                    onClick={() => handleOpenDetailModal(member)}
-                    className="bg-pink-50 hover:bg-pink-100 text-pink-500 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1 cursor-pointer"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" /> ดูรายละเอียด
-                  </button>
-
-                  <button 
+                  <button
                     onClick={() => handleOpenDeleteModal(member)}
-                    className="bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-500 text-xs font-bold px-3.5 py-2 rounded-xl transition cursor-pointer"
+                    className="bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-500 text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> ลบ
                   </button>
