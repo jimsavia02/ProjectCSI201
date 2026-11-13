@@ -347,17 +347,14 @@ app.get("/api/family-members/:memberId/realtime-hr", verifyUser, async (req, res
     }
 
     const rawHr = members[0].heart_rate;
-    const currentBpm = rawHr && rawHr !== '-' ? parseInt(String(rawHr).replace(/[^0-9]/g, '')) : 72;
+    const currentBpm = rawHr && rawHr !== '-' ? parseInt(String(rawHr).replace(/[^0-9]/g, ''), 10) || 0 : 0;
     const timeNow = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     if (!liveHrCache[memberId]) {
-      liveHrCache[memberId] = [
-        { time: '10:00:00', bpm: 72 },
-        { time: '10:00:03', bpm: 75 }
-      ];
+      liveHrCache[memberId] = [];
     }
 
-    liveHrCache[memberId].push({ time: timeNow, bpm: currentBpm || 72 });
+    liveHrCache[memberId].push({ time: timeNow, bpm: currentBpm });
     if (liveHrCache[memberId].length > 10) {
       liveHrCache[memberId].shift();
     }

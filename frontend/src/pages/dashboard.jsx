@@ -119,6 +119,8 @@ function Dashboard() {
     }
   };
 
+  const hasHrData = realtimeHrData.some(d => d.bpm > 0);
+
   if (loading) {
     return <div className="p-10 text-slate-400">กำลังโหลดข้อมูลแดชบอร์ด...</div>;
   }
@@ -174,10 +176,16 @@ function Dashboard() {
             <span className="w-8 h-8 bg-white rounded-full flex items-center justify-center text-pink-500 shadow-sm">❤️</span>
           </div>
           <div className="my-4">
-            <span className="text-5xl font-extrabold text-slate-800">
-              {memberData?.heart_rate && memberData.heart_rate !== '-' ? memberData.heart_rate.replace(' bpm', '') : '0'}
-            </span>
-            <span className="ml-2 text-slate-500 font-medium">BPM</span>
+            {memberData?.heart_rate && memberData.heart_rate !== '-' && memberData.heart_rate !== '0' ? (
+              <>
+                <span className="text-5xl font-extrabold text-slate-800">
+                  {memberData.heart_rate.replace(' bpm', '')}
+                </span>
+                <span className="ml-2 text-slate-500 font-medium">BPM</span>
+              </>
+            ) : (
+              <span className="text-base font-semibold text-slate-400">ไม่มีข้อมูลชีพจร</span>
+            )}
           </div>
           <span className="inline-block bg-white text-pink-600 text-xs px-3 py-1 rounded-full w-fit font-medium shadow-sm">
             ช่วงปกติ 60 – 100
@@ -231,17 +239,25 @@ function Dashboard() {
           </span>
         </div>
         
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={realtimeHrData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} domain={['dataMin - 10', 'dataMax + 10']} />
-              <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }} formatter={(val) => [`${val} bpm`, 'ชีพจร']} />
-              <Line type="monotone" dataKey="bpm" stroke="#ec4899" strokeWidth={3} dot={{ fill: '#ec4899', strokeWidth: 2, r: 5, stroke: '#fff' }} activeDot={{ r: 7 }} isAnimationActive={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        {!hasHrData ? (
+          <div className="h-64 w-full flex flex-col items-center justify-center gap-3 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+            <span className="text-3xl">💓</span>
+            <p className="text-slate-400 font-medium text-sm">ไม่มีข้อมูลชีพจร</p>
+            <p className="text-slate-300 text-xs">รอรับข้อมูลจากอุปกรณ์...</p>
+          </div>
+        ) : (
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={realtimeHrData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="time" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} domain={[(min) => Math.max(0, min - 10), 'dataMax + 10']} />
+                <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }} formatter={(val) => [`${val} bpm`, 'ชีพจร']} />
+                <Line type="monotone" dataKey="bpm" stroke="#ec4899" strokeWidth={3} dot={{ fill: '#ec4899', strokeWidth: 2, r: 5, stroke: '#fff' }} activeDot={{ r: 7 }} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
       {/* ส่วนนัดหมายถัดไป และ ผู้ติดต่อฉุกเฉิน */}
