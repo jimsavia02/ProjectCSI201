@@ -416,11 +416,14 @@ export default function Party2() {
     if (selectedBrand === 'garmin') {
       try {
         const res = await api.get(`/api/garmin/connect/${selectedMember.id}`);
-        if (res.data && res.data.url) {
-          window.location.href = res.data.url;
+        const authUrl = res.data?.authUrl || res.data?.url;
+        if (authUrl) {
+          window.location.href = authUrl;
+        } else {
+          alert('ไม่ได้รับลิงก์สำหรับเชื่อมต่อ Garmin Connect จากเซิร์ฟเวอร์');
         }
       } catch (err) {
-        alert('ไม่สามารถเริ่มการเชื่อมต่อได้');
+        alert(err.response?.data?.error || 'ไม่สามารถเริ่มการเชื่อมต่อได้');
       }
     } else {
       alert(`การเชื่อมต่อกับ ${selectedBrand.toUpperCase()} ยังไม่เปิดให้บริการในขณะนี้`);

@@ -479,18 +479,116 @@ app.put("/api/family-members/:memberId/emergency-contact", verifyUser, async (re
 // 7. Garmin Integration & Mock Sync Data
 // ------------------------------------------
 
-app.get("/api/garmin/connect/:memberId", verifyUser, (req, res) => {
+// Garmin OAuth 2.0 PKCE endpoints
+const GARMIN_AUTH_URL = "https://connect.garmin.com/oauth2Confirm";
+const GARMIN_TOKEN_URL = "https://diauth.garmin.com/di-oauth2-service/oauth/token";
+const GARMIN_USER_ID_URL = "https://apis.garmin.com/wellness-api/rest/user/id";
+
+// state -> { codeVerifier, memberId, userId, createdAt } (หมดอายุใน 10 นาที)
+const garminPendingAuth = new Map();
+const GARMIN_STATE_TTL_MS = 10 * 60 * 1000;
+
+app.get("/api/garmin/connect/:memberId", verifyUser, async (req, res) => {
   const { memberId } = req.params;
-  
-  if (!GARMIN_CLIENT_ID) {
-    return res.status(400).json({ 
+
+  if (!GARMIN_CLIENT_ID || !GARMIN_REDIRECT_URI) {
+    return res.status(400).json({
       error: "ยังไม่ได้กำหนดค่า Garmin Client ID ในระบบ (สามารถใช้ Mock Sync ทดแทนได้)",
-      mockSupported: true 
+      mockSupported: true,
     });
   }
 
-  const authUrl = `https://connect.garmin.com/oauth2/authorize?client_id=${GARMIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(GARMIN_REDIRECT_URI)}&response_type=code`;
-  return res.json({ authUrl });
+  try {
+    const [rows] = await db.execute(
+      "SELECT id FROM family_members WHERE id = ? AND user_id = ?",
+      [memberId, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+
+    // ล้าง state ที่หมดอายุ
+    const now = Date.now();
+    for (const [key, value] of garminPendingAuth) {
+      if (now - value.createdAt > GARMIN_STATE_TTL_MS) garminPendingAuth.delete(key);
+    }
+
+    const codeVerifier = crypto.randomBytes(48).toString("base64url");
+    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    const state = crypto.randomBytes(16).toString("hex");
+    garminPendingAuth.set(state, { codeVerifier, memberId, userId: req.user.id, createdAt: now });
+
+    const params = new URLSearchParams({
+      client_id: GARMIN_CLIENT_ID,
+      response_type: "code",
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+      redirect_uri: GARMIN_REDIRECT_URI,
+      state,
+    });
+    return res.json({ authUrl: `${GARMIN_AUTH_URL}?${params}` });
+  } catch (err) {
+    console.error("Garmin connect error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Garmin จะ redirect กลับมาที่นี่หลังผู้ใช้กดอนุญาต
+app.get("/api/garmin/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  const backToParty = (status) => res.redirect(`${CLIENT_ORIGIN}/party?status=${status}`);
+
+  const pending = state && garminPendingAuth.get(state);
+  if (state) garminPendingAuth.delete(state);
+
+  if (error || !code || !pending || Date.now() - pending.createdAt > GARMIN_STATE_TTL_MS) {
+    console.error("Garmin callback rejected:", { error, hasCode: !!code, validState: !!pending });
+    return backToParty("error");
+  }
+
+  try {
+    const tokenRes = await axios.post(
+      GARMIN_TOKEN_URL,
+      new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: GARMIN_CLIENT_ID,
+        client_secret: GARMIN_CLIENT_SECRET,
+        code,
+        code_verifier: pending.codeVerifier,
+        redirect_uri: GARMIN_REDIRECT_URI,
+      }),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
+    const { access_token, refresh_token, expires_in } = tokenRes.data;
+
+    let garminUserId = null;
+    try {
+      const idRes = await axios.get(GARMIN_USER_ID_URL, {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+      garminUserId = idRes.data?.userId ?? null;
+    } catch (e) {
+      console.warn("Garmin user id fetch failed:", e.response?.status || e.message);
+    }
+
+    await db.execute(
+      `UPDATE family_members
+       SET garmin_user_id = ?, garmin_access_token = ?, garmin_refresh_token = ?,
+           garmin_token_expires_at = ?, is_connected = 1
+       WHERE id = ? AND user_id = ?`,
+      [
+        garminUserId,
+        access_token,
+        refresh_token ?? null,
+        Date.now() + (Number(expires_in) || 0) * 1000,
+        pending.memberId,
+        pending.userId,
+      ]
+    );
+
+    return backToParty("success");
+  } catch (err) {
+    console.error("Garmin token exchange failed:", err.response?.data || err.message);
+    return backToParty("error");
+  }
 });
 
 app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
@@ -789,50 +887,104 @@ app.post("/api/support/messages", verifyUser, async (req, res) => {
 // ------------------------------------------
 // 8. Admin APIs (ต้องล็อกอินเป็น admin)
 // ------------------------------------------
-const THAI_DAYS = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
-
-// สถิติหน้าภาพรวม admin: ผู้ใช้ทั้งหมด + ผู้สมัครใหม่รายวันย้อนหลัง 7 วัน (รวมวันนี้)
+// สถิติหน้าภาพรวม admin (โค้ดจาก jimsavia02): ผู้ใช้, อุปกรณ์, ออนไลน์, สมัครใหม่, กราฟ 7 วัน, อุปกรณ์ตามยี่ห้อ
 app.get("/admin/dashboard-stats", verifyUser, verifyAdmin, async (req, res) => {
   try {
+    // ผู้ใช้ทั้งหมด
     const [[{ totalUsers }]] = await db.execute(
       "SELECT COUNT(*) AS totalUsers FROM users WHERE role = 'user'"
     );
 
-    // นาฬิกาที่เชื่อมต่อแล้ว เทียบกับสมาชิกครอบครัวทั้งหมดในระบบ
-    const [[devices]] = await db.execute(
-      "SELECT COUNT(*) AS totalMembers, COALESCE(SUM(is_connected = 1), 0) AS connectedDevices FROM family_members"
+    // ผู้ใช้ใหม่สัปดาห์นี้
+    const [[{ weeklyUserGrowth }]] = await db.execute(
+      "SELECT COUNT(*) AS weeklyUserGrowth FROM users WHERE role = 'user' AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
     );
 
-    const today = startOfDay(new Date());
-    const from = new Date(today);
-    from.setDate(from.getDate() - 6);
-
-    const [rows] = await db.execute(
-      `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS day, COUNT(*) AS count
-       FROM users
-       WHERE role = 'user' AND created_at >= ?
-       GROUP BY day`,
-      [from]
+    // อุปกรณ์ทั้งหมด (family members)
+    const [[{ totalDevices }]] = await db.execute(
+      "SELECT COUNT(*) AS totalDevices FROM family_members"
     );
-    const countByDay = Object.fromEntries(rows.map((r) => [r.day, Number(r.count)]));
 
-    // ใส่ให้ครบ 7 วัน วันที่ไม่มีคนสมัครเป็น 0
-    const weeklyData = [];
-    for (let d = new Date(from); d <= today; d.setDate(d.getDate() + 1)) {
-      const key = toDateKey(d);
-      weeklyData.push({ date: key, day: THAI_DAYS[d.getDay()], count: countByDay[key] ?? 0 });
-    }
+    // อุปกรณ์ใหม่สัปดาห์นี้
+    const [[{ weeklyDeviceGrowth }]] = await db.execute(
+      "SELECT COUNT(*) AS weeklyDeviceGrowth FROM family_members WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+    );
+
+    // ออนไลน์วันนี้ (is_connected = 1)
+    const [[{ onlineToday }]] = await db.execute(
+      "SELECT COUNT(*) AS onlineToday FROM family_members WHERE is_connected = 1"
+    );
+    const onlinePct = totalDevices > 0 ? Math.round((onlineToday / totalDevices) * 100) : 0;
+
+    // เข้าใช้วันนี้ (users ที่ล็อกอินในวันนี้ — ใช้ตาราง users ที่มีอยู่ โดยนับ user สมัครวันนี้แทน)
+    const [[{ newUsersToday }]] = await db.execute(
+      "SELECT COUNT(*) AS newUsersToday FROM users WHERE role = 'user' AND DATE(created_at) = CURDATE()"
+    );
+    const [[{ newUsersYesterday }]] = await db.execute(
+      "SELECT COUNT(*) AS newUsersYesterday FROM users WHERE role = 'user' AND DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
+    );
+
+    // ผู้ใช้ใหม่รายวัน 7 วันล่าสุด
+    const [weeklyRows] = await db.execute(`
+      SELECT
+        DATE_FORMAT(d.day, '%a') AS dayLabel,
+        COALESCE(u.cnt, 0) AS count
+      FROM (
+        SELECT CURDATE() - INTERVAL n DAY AS day
+        FROM (SELECT 0 n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6) nums
+        ORDER BY n DESC
+      ) d
+      LEFT JOIN (
+        SELECT DATE(created_at) AS reg_date, COUNT(*) AS cnt
+        FROM users WHERE role = 'user' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        GROUP BY DATE(created_at)
+      ) u ON d.day = u.reg_date
+      ORDER BY d.day ASC
+    `);
+
+    // แปลง dayLabel เป็นภาษาไทย
+    const dayMap = { Mon: 'จ.', Tue: 'อ.', Wed: 'พ.', Thu: 'พฤ.', Fri: 'ศ.', Sat: 'ส.', Sun: 'อา.' };
+    const weeklyData = weeklyRows.map((r) => ({
+      day: dayMap[r.dayLabel] || r.dayLabel,
+      count: Number(r.count),
+    }));
+
+    // อุปกรณ์ตามยี่ห้อ (จาก device column)
+    const [deviceRows] = await db.execute(
+      "SELECT device FROM family_members WHERE device IS NOT NULL AND device != ''"
+    );
+    const brandMap = {};
+    deviceRows.forEach(({ device }) => {
+      const d = (device || "").toLowerCase();
+      let brand = "อื่นๆ";
+      // เช็กยี่ห้อที่ชื่อชัดเจนก่อน (เช่น "Garmin Smartwatch" มีคำว่า watch แต่เป็น Garmin)
+      if (d.includes("garmin")) brand = "Garmin";
+      else if (d.includes("samsung") || d.includes("galaxy")) brand = "Samsung Galaxy Watch";
+      else if (d.includes("apple")) brand = "Apple Watch";
+      else if (d.includes("xiaomi") || d.includes("mi band") || d.includes("amazfit")) brand = "Xiaomi / อื่นๆ";
+      brandMap[brand] = (brandMap[brand] || 0) + 1;
+    });
+    const totalBranded = Object.values(brandMap).reduce((a, b) => a + b, 0) || 1;
+    const brandOrder = ["Apple Watch", "Samsung Galaxy Watch", "Garmin", "Xiaomi / อื่นๆ", "อื่นๆ"];
+    const deviceBrands = brandOrder
+      .filter((b) => brandMap[b])
+      .map((b) => ({ brand: b, count: brandMap[b], pct: Math.round((brandMap[b] / totalBranded) * 100) }));
 
     return res.json({
       totalUsers: Number(totalUsers),
-      totalMembers: Number(devices.totalMembers),
-      connectedDevices: Number(devices.connectedDevices),
-      weeklyGrowth: weeklyData.reduce((sum, d) => sum + d.count, 0),
+      weeklyUserGrowth: Number(weeklyUserGrowth),
+      totalDevices: Number(totalDevices),
+      weeklyDeviceGrowth: Number(weeklyDeviceGrowth),
+      onlineToday: Number(onlineToday),
+      onlinePct,
+      newUsersToday: Number(newUsersToday),
+      newUsersYesterday: Number(newUsersYesterday),
       weeklyData,
+      deviceBrands,
     });
   } catch (err) {
     console.error("Admin dashboard stats error:", err);
-    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลสถิติได้" });
+    return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลได้" });
   }
 });
 
