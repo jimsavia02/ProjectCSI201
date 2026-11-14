@@ -433,14 +433,17 @@ export default function Party2() {
   const handleSync = async (member) => {
     try {
       setSyncingId(member.id);
+      // ===== [แก้ไข] เริ่ม: เรียก /api/garmin/sync เพื่อดึงข้อมูลจริงจาก Garmin =====
       const res = await api.post(`/api/garmin/sync/${member.id}`);
 
+      // server ส่งกลับ res.data.member = { heart_rate, steps, sleep, status, is_connected, last_synced_at }
       if (res.data.member) {
         setMembers((prev) =>
           prev.map((m) => (m.id === member.id ? { ...m, ...res.data.member } : m))
         );
       }
       if (res.data.message) alert(res.data.message);
+      // ===== [แก้ไข] จบ =====
     } catch (err) {
       alert(err.response?.data?.error || 'ซิงค์ข้อมูลไม่สำเร็จ');
     } finally {

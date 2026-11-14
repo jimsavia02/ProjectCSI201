@@ -588,6 +588,112 @@ app.get("/api/garmin/callback", async (req, res) => {
   }
 });
 
+// ===== [แก้ไข] เริ่ม: ดึงข้อมูลจริงจาก Garmin Health API =====
+const GARMIN_API = "https://apis.garmin.com/wellness-api/rest";
+
+// คืน access token ที่ยังใช้ได้ ถ้าหมดอายุจะใช้ refresh token ขอใหม่แล้วบันทึกลงฐานข้อมูล
+async function getValidGarminToken(member) {
+  if (member.garmin_token_expires_at && Date.now() < Number(member.garmin_token_expires_at) - 60_000) {
+    return member.garmin_access_token;
+  }
+  if (!member.garmin_refresh_token) throw new Error("NO_REFRESH_TOKEN");
+
+  const r = await axios.post(
+    GARMIN_TOKEN_URL,
+    new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: GARMIN_CLIENT_ID,
+      client_secret: GARMIN_CLIENT_SECRET,
+      refresh_token: member.garmin_refresh_token,
+    }),
+    { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+  );
+  const { access_token, refresh_token, expires_in } = r.data;
+  await db.execute(
+    `UPDATE family_members
+     SET garmin_access_token = ?, garmin_refresh_token = ?, garmin_token_expires_at = ?
+     WHERE id = ?`,
+    [
+      access_token,
+      refresh_token ?? member.garmin_refresh_token,
+      Date.now() + (Number(expires_in) || 0) * 1000,
+      member.id,
+    ]
+  );
+  return access_token;
+}
+
+app.post("/api/garmin/sync/:memberId", verifyUser, async (req, res) => {
+  const { memberId } = req.params;
+  try {
+    const [rows] = await db.execute(
+      `SELECT id, garmin_access_token, garmin_refresh_token, garmin_token_expires_at
+       FROM family_members WHERE id = ? AND user_id = ?`,
+      [memberId, req.user.id]
+    );
+    const member = rows[0];
+    if (!member) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+    if (!member.garmin_access_token) {
+      return res.status(400).json({ error: "สมาชิกนี้ยังไม่ได้เชื่อมต่อ Garmin" });
+    }
+
+    const token = await getValidGarminToken(member);
+    const end = Math.floor(Date.now() / 1000);
+    const start = end - 86400; // Garmin ให้ขอได้ไม่เกิน 24 ชม. ต่อครั้ง
+    const q = {
+      params: { uploadStartTimeInSeconds: start, uploadEndTimeInSeconds: end },
+      headers: { Authorization: `Bearer ${token}` },
+    };
+
+    const [dailiesRes, sleepsRes] = await Promise.all([
+      axios.get(`${GARMIN_API}/dailies`, q),
+      axios.get(`${GARMIN_API}/sleeps`, q),
+    ]);
+
+    const daily = Array.isArray(dailiesRes.data) ? dailiesRes.data.at(-1) : null;
+    const sleepRec = Array.isArray(sleepsRes.data) ? sleepsRes.data.at(-1) : null;
+    if (!daily && !sleepRec) {
+      return res.json({
+        message: "ยังไม่มีข้อมูลใหม่ — ลองเปิดแอป Garmin Connect บนมือถือให้นาฬิกาซิงค์ก่อน",
+      });
+    }
+
+    const hr = daily?.restingHeartRateInBeatsPerMinute ?? daily?.averageHeartRateInBeatsPerMinute ?? null;
+    const stepsNum = daily?.steps ?? 0;
+    const sleepHours = sleepRec ? +(sleepRec.durationInSeconds / 3600).toFixed(1) : null;
+
+    let status = "ปกติ";
+    if (hr && (hr > 100 || hr < 50)) status = "อันตราย";
+
+    const updated = {
+      heart_rate: hr ? `${hr} bpm` : "-",
+      steps: stepsNum.toLocaleString("en-US"),
+      sleep: sleepHours != null ? `${sleepHours} ชม.` : "-",
+      status,
+    };
+
+    await db.execute(
+      `UPDATE family_members
+       SET heart_rate = ?, steps = ?, sleep = ?, status = ?, is_connected = 1, last_synced_at = NOW()
+       WHERE id = ? AND user_id = ?`,
+      [updated.heart_rate, updated.steps, updated.sleep, updated.status, memberId, req.user.id]
+    );
+    await saveHealthHistory(memberId, hr, stepsNum, sleepHours ?? 0);
+
+    return res.json({
+      message: "ซิงค์ข้อมูลจาก Garmin สำเร็จ",
+      member: { ...updated, is_connected: 1, last_synced_at: new Date().toISOString() },
+    });
+  } catch (err) {
+    console.error("Garmin sync error:", err.response?.status, err.response?.data || err.message);
+    if (err.response?.status === 401 || err.message === "NO_REFRESH_TOKEN") {
+      return res.status(401).json({ error: "การเชื่อมต่อ Garmin หมดอายุ กรุณาเชื่อมต่อใหม่" });
+    }
+    return res.status(502).json({ error: "ดึงข้อมูลจาก Garmin ไม่สำเร็จ" });
+  }
+});
+// ===== [แก้ไข] จบ =====
+
 app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
   const { memberId } = req.params;
   const currentUserId = req.user.id;
