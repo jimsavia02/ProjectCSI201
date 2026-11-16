@@ -9,6 +9,10 @@
     "start": "nodemon index.js",
     "seed:health": "node seed-health.js"
   },
+  "nodemonConfig": {
+    "watch": [".", ".env"],
+    "ext": "js,mjs,json"
+  },
   "dependencies": {
     "axios": "^1.21.0",
     "bcrypt": "^6.0.0",

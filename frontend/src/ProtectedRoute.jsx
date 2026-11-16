@@ -1,7 +1,38 @@
+import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import api from './api.js';
+
+const readStoredUser = () => {
+  try {
+    return JSON.parse(localStorage.getItem('user'));
+  } catch {
+    return null;
+  }
+};
 
 function ProtectedRoute({ children, allowedRole }) {
-  const user = JSON.parse(localStorage.getItem('user'));
+  const [user, setUser] = useState(readStoredUser);
+  // ไม่มี user ใน localStorage แต่อาจมี cookie อยู่แล้ว (เข้าผ่าน magic link จาก LINE) -> ถาม /me ก่อน
+  const [checking, setChecking] = useState(!user);
+
+  useEffect(() => {
+    if (user) return;
+    let ignore = false;
+    api
+      .get('/me')
+      .then((res) => {
+        if (ignore) return;
+        localStorage.setItem('user', JSON.stringify(res.data));
+        setUser(res.data);
+      })
+      .catch(() => {})
+      .finally(() => !ignore && setChecking(false));
+    return () => {
+      ignore = true;
+    };
+  }, [user]);
+
+  if (checking) return null;
 
   // 1. ยังไม่ได้ล็อกอิน -> ส่งไปหน้า /login
   if (!user) {

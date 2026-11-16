@@ -14,7 +14,14 @@ CREATE TABLE IF NOT EXISTS users (
   phone VARCHAR(20) DEFAULT NULL,
   password VARCHAR(255) NOT NULL,
   role VARCHAR(20) DEFAULT 'user',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  line_user_id VARCHAR(64) DEFAULT NULL UNIQUE, -- LINE userId ที่ผูกไว้รับแจ้งเตือน (1 LINE ผูกได้แค่ 1 บัญชี)
+  line_link_code VARCHAR(10) DEFAULT NULL,      -- รหัส 6 หลักชั่วคราวสำหรับจับคู่ LINE
+  line_link_expires DATETIME DEFAULT NULL,
+  line_snooze_until DATETIME DEFAULT NULL,      -- พิมพ์ "ปลอดภัย" ใน LINE -> หยุดแจ้งเตือนถึงเวลานี้
+  line_login_token CHAR(64) DEFAULT NULL,       -- sha256 ของ magic link จากปุ่มใน LINE (ใช้ได้ครั้งเดียว)
+  line_login_expires DATETIME DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_line_login_token (line_login_token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 2. ตาราง family_members
@@ -35,6 +42,7 @@ CREATE TABLE IF NOT EXISTS family_members (
   garmin_refresh_token TEXT DEFAULT NULL,
   garmin_token_expires_at BIGINT DEFAULT NULL,
   last_synced_at DATETIME DEFAULT NULL,
+  last_alert_at DATETIME DEFAULT NULL, -- เวลาที่ส่งแจ้งเตือน LINE ล่าสุด
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -76,4 +84,37 @@ CREATE TABLE IF NOT EXISTS support_messages (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_user_time (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 6. ตาราง emergency_cases (เคสเหตุฉุกเฉินที่ admin ติดตาม: ชีพจรผิดปกติ / SOS / ล้ม)
+CREATE TABLE IF NOT EXISTS emergency_cases (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  member_id INT NOT NULL,
+  type VARCHAR(10) NOT NULL,                    -- hr = ชีพจรผิดปกติ (เผื่อเพิ่ม sos / fall เมื่อนาฬิการองรับ)
+  status VARCHAR(20) NOT NULL DEFAULT 'open', -- open = ยังไม่มีผู้รับ | in_progress = กำลังดูแล | closed = ปิดแล้ว
+  bpm INT DEFAULT NULL,                         -- ชีพจรตอนเปิดเคส
+  peak_bpm INT DEFAULT NULL,                    -- ค่าที่ผิดปกติที่สุดระหว่างเคส
+  last_bpm INT DEFAULT NULL,                    -- ชีพจรล่าสุด
+  last_bpm_at DATETIME DEFAULT NULL,
+  recovered_at DATETIME DEFAULT NULL,           -- ชีพจรกลับมาปกติเมื่อไร (ยังไม่ปิดเคสเอง)
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_at DATETIME DEFAULT NULL,        -- มีผู้รับเรื่องเมื่อไร (ผู้ดูแลทาง LINE หรือ admin)
+  closed_at DATETIME DEFAULT NULL,
+  FOREIGN KEY (member_id) REFERENCES family_members(id) ON DELETE CASCADE,
+  INDEX idx_status_created (status, created_at),
+  INDEX idx_member_type_status (member_id, type, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7. ตาราง emergency_case_events (ไทม์ไลน์ของแต่ละเคส)
+CREATE TABLE IF NOT EXISTS emergency_case_events (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  case_id INT NOT NULL,
+  kind VARCHAR(20) NOT NULL,                    -- created | line | ack | status | note | hr | recovered
+  actor VARCHAR(20) NOT NULL DEFAULT 'system', -- system | caregiver | admin
+  admin_id INT DEFAULT NULL,                    -- admin ที่ทำรายการ
+  message VARCHAR(500) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (case_id) REFERENCES emergency_cases(id) ON DELETE CASCADE,
+  FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_case_time (case_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,20 +1,15 @@
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { KeyRound } from "lucide-react";
+import { KeyRound, MessageCircle } from "lucide-react";
 import api, { getErrorMessage } from "../api.js";
 
 // สวิตช์การแจ้งเตือน (ตอนนี้กดเปิด/ปิดได้อย่างเดียว ยังไม่ได้บันทึกและยังไม่ได้ส่งแจ้งเตือนจริง)
+// การแจ้งเตือนผ่าน LINE แยกไปอยู่ใน <LineConnect> ด้านล่าง
 const NOTIFICATION_OPTIONS = [
   {
     key: "app",
     label: "แจ้งเตือนผ่านแอป",
     desc: "รับการแจ้งเตือนทันที",
-    defaultOn: true,
-  },
-  {
-    key: "line",
-    label: "แจ้งเตือนผ่าน LINE",
-    desc: "เฉพาะเหตุฉุกเฉิน",
     defaultOn: true,
   },
   {
@@ -61,6 +56,187 @@ function Toggle({ checked, onChange, label }) {
         }`}
       />
     </button>
+  );
+}
+
+// เชื่อม LINE รับแจ้งเตือนชีพจรผิดปกติของสมาชิกในบัญชีนี้
+// ขั้นตอน: กดขอรหัส -> เพิ่มเพื่อนบอท -> พิมพ์รหัสในแชท -> หน้านี้เช็กสถานะเองทุก 3 วินาที
+function LineConnect() {
+  const [status, setStatus] = useState(null);
+  const [code, setCode] = useState(null); // { code, expiresAt }
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState({ type: "", text: "" });
+
+  const loadStatus = () =>
+    api
+      .get("/api/line/status")
+      .then((res) => {
+        setStatus(res.data);
+        return res.data;
+      })
+      .catch((err) => setNote({ type: "error", text: getErrorMessage(err) }));
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  // ระหว่างรอผู้ใช้พิมพ์รหัสใน LINE: นับถอยหลัง + เช็กว่าเชื่อมสำเร็จหรือยัง
+  useEffect(() => {
+    if (!code) return;
+    const tick = setInterval(() => {
+      const left = Math.max(0, Math.round((code.expiresAt - Date.now()) / 1000));
+      setSecondsLeft(left);
+      if (left === 0) setCode(null);
+    }, 1000);
+    const poll = setInterval(async () => {
+      const s = await loadStatus();
+      if (s?.linked) {
+        setCode(null);
+        setNote({ type: "success", text: "เชื่อม LINE สำเร็จ" });
+      }
+    }, 3000);
+    return () => {
+      clearInterval(tick);
+      clearInterval(poll);
+    };
+  }, [code]);
+
+  const run = async (fn) => {
+    setBusy(true);
+    setNote({ type: "", text: "" });
+    try {
+      await fn();
+    } catch (err) {
+      setNote({ type: "error", text: getErrorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestCode = () =>
+    run(async () => {
+      const res = await api.post("/api/line/link-code");
+      setCode({
+        code: res.data.code,
+        expiresAt: Date.now() + res.data.expiresInSeconds * 1000,
+      });
+      setSecondsLeft(res.data.expiresInSeconds);
+    });
+
+  const sendTest = () =>
+    run(async () => {
+      const res = await api.post("/api/line/test");
+      setNote({ type: "success", text: res.data.message });
+    });
+
+  const unlink = () =>
+    run(async () => {
+      if (!window.confirm("ยกเลิกการเชื่อม LINE? จะไม่ได้รับแจ้งเตือนอีก")) return;
+      const res = await api.delete("/api/line/link");
+      await loadStatus();
+      setNote({ type: "success", text: res.data.message });
+    });
+
+  const mmss = `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")}`;
+  const smallBtn =
+    "cursor-pointer rounded-[12px] border border-[#f1dce5] bg-white px-4 py-2 text-sm font-semibold text-[#f05289] transition hover:border-[#f66c9c] hover:bg-[#fff5f8] disabled:opacity-60";
+
+  return (
+    <div className="mt-3 border-b border-[#f6e6ed] py-4">
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e6f9ee] text-[#06c755]">
+          <MessageCircle className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">แจ้งเตือนผ่าน LINE</p>
+          <p className="text-xs text-[#9d8994]">
+            {status?.thresholds
+              ? `แจ้งเมื่อชีพจรของสมาชิกในบัญชีนี้สูงกว่า ${status.thresholds.high} หรือต่ำกว่า ${status.thresholds.low} bpm`
+              : "แจ้งเมื่อชีพจรของสมาชิกในบัญชีนี้ผิดปกติ"}
+          </p>
+        </div>
+        {status?.linked && (
+          <span className="shrink-0 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+            เชื่อมแล้ว
+          </span>
+        )}
+      </div>
+
+      {note.text && (
+        <p
+          role={note.type === "error" ? "alert" : "status"}
+          className={`mt-3 rounded-xl px-4 py-2.5 text-sm ${
+            note.type === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+          }`}
+        >
+          {note.text}
+        </p>
+      )}
+
+      {!status ? null : !status.enabled ? (
+        <p className="mt-3 text-sm text-[#9d8994]">ระบบแจ้งเตือน LINE ยังไม่พร้อมใช้งาน</p>
+      ) : status.linked ? (
+        <>
+        <p className="mt-3 text-xs text-[#9d8994]">
+          {status.snoozedUntil
+            ? `🔕 พักการแจ้งเตือนอยู่ถึง ${new Date(status.snoozedUntil).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`
+            : `แจ้งเตือนทุกครั้งที่เกินเกณฑ์ · พิมพ์ "${status.snoozeWord}" ใน LINE เพื่อพัก 10 นาที`}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={sendTest} disabled={busy} className={smallBtn}>
+            ส่งข้อความทดสอบ
+          </button>
+          <button
+            type="button"
+            onClick={unlink}
+            disabled={busy}
+            className="cursor-pointer rounded-[12px] px-4 py-2 text-sm font-semibold text-[#9d8994] transition hover:text-red-600 disabled:opacity-60"
+          >
+            ยกเลิกการเชื่อม
+          </button>
+        </div>
+        </>
+      ) : code ? (
+        <div className="mt-3 rounded-2xl bg-[#fff5f8] p-4">
+          <ol className="list-decimal space-y-1 pl-5 text-sm text-[#786671]">
+            <li>
+              เพิ่มเพื่อนบอท
+              {status.botName ? ` "${status.botName}"` : ""}
+              {status.addFriendUrl && (
+                <>
+                  {" "}
+                  <a
+                    href={status.addFriendUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-[#06c755] underline"
+                  >
+                    เพิ่มเพื่อนที่นี่
+                  </a>
+                </>
+              )}
+            </li>
+            <li>พิมพ์รหัสนี้ส่งในแชทบอท</li>
+          </ol>
+          <p className="mt-3 text-center font-mono text-3xl font-bold tracking-[0.3em] text-[#3c3038]">
+            {code.code}
+          </p>
+          <p className="mt-1 text-center text-xs text-[#9d8994]">
+            รหัสหมดอายุใน {mmss} นาที · กำลังรอการยืนยันจาก LINE...
+          </p>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={requestCode}
+          disabled={busy}
+          className="mt-3 cursor-pointer rounded-[12px] bg-[#06c755] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-95 disabled:opacity-60"
+        >
+          เชื่อม LINE
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -453,7 +629,9 @@ function Setting() {
             การแจ้งเตือน &amp; ความเป็นส่วนตัว
           </h2>
 
-          <ul className="mt-3">
+          <LineConnect />
+
+          <ul>
             {NOTIFICATION_OPTIONS.map((option) => (
               <li
                 key={option.key}

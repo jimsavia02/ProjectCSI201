@@ -88,8 +88,8 @@ function Home() {
 
   return (
     <div className="flex min-h-screen bg-white">
-      {/* Sidebar ด้านซ้าย */}
-      <aside className="w-56 shrink-0 bg-pink-50 px-4 py-5 text-slate-600 max-sm:w-40 max-sm:px-3 border-r border-rose-100/50">
+      {/* Sidebar ด้านซ้าย (จอ md ขึ้นไป) — มือถือใช้แถบเมนูด้านล่างแทน */}
+      <aside className="hidden w-56 shrink-0 bg-pink-50 px-4 py-5 text-slate-600 border-r border-rose-100/50 md:block">
         <div className="mb-8 flex items-center gap-2.5 px-1">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-pink-400 text-white shadow-xs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6" aria-hidden="true">
@@ -133,24 +133,54 @@ function Home() {
 
       {/* ฝั่งขวา: ขยายเต็มพื้นที่ bg-white และไม่มี padding กั้น */}
       <div className="min-w-0 flex-1 bg-white min-h-screen flex flex-col">
-        <header className="flex items-center justify-between bg-white px-8 py-4 border-b border-slate-100">
-          <h1 className="text-xl font-bold text-slate-800">Smart Watch Dashboard</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-lg font-semibold text-slate-800">{user.name}</span>
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 bg-white px-4 py-3 border-b border-slate-100 md:static md:px-8 md:py-4">
+          {/* มือถือ: แสดงโลโก้แทนชื่อยาว */}
+          <div className="flex min-w-0 items-center gap-2 md:hidden">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-pink-400 text-white">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
+              </svg>
+            </span>
+            <span className="truncate text-sm font-bold text-slate-800">PINK STUDIO</span>
+          </div>
+          <h1 className="hidden text-xl font-bold text-slate-800 md:block">Smart Watch Dashboard</h1>
+          <div className="flex min-w-0 items-center gap-2 md:gap-4">
+            <span className="truncate text-sm font-semibold text-slate-800 md:text-lg">{user.name}</span>
             <button
               onClick={handleLogout}
-              className="rounded-lg bg-pink-300 px-4 py-2 text-sm font-medium text-pink-950 hover:bg-pink-400 transition-colors cursor-pointer"
+              className="shrink-0 rounded-lg bg-pink-300 px-3 py-1.5 text-xs font-medium text-pink-950 hover:bg-pink-400 transition-colors cursor-pointer md:px-4 md:py-2 md:text-sm"
             >
               Logout
             </button>
           </div>
         </header>
 
-        {/* main: ลบ p-6 ออก เปลี่ยนเป็น p-8 เพื่อให้ระยะห่างสวยงามพอดีโดยไม่มีกรอบสีเทากั้น */}
-        <main className="flex-1 bg-white p-8">
+        {/* main: มือถือ p-3 และเว้นที่ด้านล่างให้แถบเมนู / จอใหญ่ p-8 เหมือนเดิม */}
+        <main className="flex-1 bg-white p-3 pb-24 md:p-8">
           <Outlet context={{ user, setUser, onLogout: handleLogout }} />
         </main>
       </div>
+
+      {/* แถบเมนูด้านล่าง (มือถือเท่านั้น) */}
+      <nav
+        aria-label="เมนูหลัก"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-rose-100 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+      >
+        {menuItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) => `flex flex-col items-center gap-1 py-2 text-[11px] transition-colors ${
+              isActive ? 'font-semibold text-pink-500' : 'text-slate-400'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+              {item.icon}
+            </svg>
+            <span className="leading-none">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
 
       {/* ปุ่มแชทติดต่อเจ้าหน้าที่ มุมขวาล่าง (แสดงทุกหน้าของ user) */}
       <UserSupportChat />

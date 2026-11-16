@@ -15,6 +15,7 @@ import AdminDashboard from './pages/admin/AdminDashboard.jsx'
 import AdminUsers from './pages/admin/AdminUsers.jsx'
 import AdminDevices from './pages/admin/AdminDevices.jsx'
 import AdminReports from './pages/admin/AdminReports.jsx'
+import AdminEmergency from './pages/admin/AdminEmergency.jsx'
 import AdminSettings from './pages/admin/AdminSettings.jsx'
 import ProtectedRoute from './ProtectedRoute.jsx'
 
@@ -55,6 +56,7 @@ function App() {
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="devices" element={<AdminDevices />} />
+          <Route path="emergency" element={<AdminEmergency />} />
           <Route path="reports" element={<AdminReports />} />
           <Route path="settings" element={<AdminSettings />} />
         </Route>

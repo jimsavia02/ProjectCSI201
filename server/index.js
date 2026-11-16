@@ -9,6 +9,9 @@ import crypto from "crypto";
 import axios from "axios";
 import "dotenv/config";
 import { READING_TYPES, purgeOldReadings, syncMockReadings, startOfDay } from "./mockHealth.js";
+import { registerLineWebhook, registerLineRoutes, consumeLoginToken } from "./line.js";
+import { registerEmergencyRoutes, handleHeartRate } from "./emergency.js";
+import { REPORT_PERIODS, buildMemberReport, toDateKey } from "./report.js";
 
 // ------------------------------------------
 // 1. Environmental Variables Configuration
@@ -51,6 +54,17 @@ async function saveHealthHistory(memberId, hrNum, stepsNum, sleepHoursNum) {
 // ------------------------------------------
 const app = express();
 
+// Database Pool Connection
+const db = mysql.createPool({
+  host: process.env.DB_HOST || "localhost",
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASSWORD || "",
+  database: process.env.DB_NAME || "signup_login",
+});
+
+// LINE webhook ต้องมาก่อน express.json() เพราะต้องใช้ body ดิบตรวจลายเซ็น
+registerLineWebhook(app, express, db);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
 app.use(cookieParser());
@@ -63,14 +77,6 @@ app.use(
     cookie: { maxAge: 15 * 60 * 1000 },
   })
 );
-
-// Database Pool Connection
-const db = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "signup_login",
-});
 
 // ------------------------------------------
 // 3. Custom Middlewares
@@ -109,6 +115,12 @@ const isValidPhone = (phone) => {
   if (phone == null || phone === "") return true;
   return typeof phone === "string" && /^\d{1,10}$/.test(phone.trim());
 };
+
+// เชื่อม LINE แจ้งเตือน (สถานะ / ขอรหัสจับคู่ / ยกเลิก / ทดสอบ)
+registerLineRoutes(app, db, verifyUser);
+
+// เหตุฉุกเฉิน (หน้า admin): รายการเคส / รายละเอียด / เปลี่ยนสถานะ / บันทึกการประสานงาน
+registerEmergencyRoutes(app, db, verifyUser, verifyAdmin);
 
 // ------------------------------------------
 // 4. Auth & User Routes
@@ -176,6 +188,27 @@ app.post("/login", async (req, res) => {
 
 app.get("/me", verifyUser, (req, res) => {
   return res.json({ id: req.user.id, name: req.user.name, role: req.user.role });
+});
+
+// Magic link จากปุ่มในแชท LINE: /auth/line?t=<token>&next=/dashboard
+// token ใช้ได้ครั้งเดียว อายุ 5 นาที -> ออก cookie แบบเดียวกับ /login แล้วพาไปหน้าที่ต้องการ
+app.get("/auth/line", async (req, res) => {
+  const webUrl = process.env.PUBLIC_WEB_URL?.trim().replace(/\/+$/, "") || CLIENT_ORIGIN;
+  // รับเฉพาะ path ภายในเว็บ ("/x" แต่ไม่ใช่ "//evil.com" หรือ "/\evil.com") กัน open redirect
+  const next = String(req.query.next || "/dashboard");
+  const safeNext = /^\/(?![\/\\])/.test(next) ? next : "/dashboard";
+
+  try {
+    const user = await consumeLoginToken(db, String(req.query.t || ""));
+    if (!user) return res.redirect(`${webUrl}/login`);
+
+    const token = jwt.sign({ id: user.id, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: "1d" });
+    res.cookie("token", token, COOKIE_OPTIONS);
+    return res.redirect(`${webUrl}${safeNext}`);
+  } catch (err) {
+    console.error("LINE magic link error:", err);
+    return res.redirect(`${webUrl}/login`);
+  }
 });
 
 app.post("/logout", (req, res) => {
@@ -363,6 +396,34 @@ app.get("/api/family-members/:memberId/realtime-hr", verifyUser, async (req, res
   } catch (err) {
     console.error("Fetch Realtime HR error:", err);
     return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลเรียลไทม์ได้" });
+  }
+});
+
+// รับชีพจรสดจากนาฬิกาผ่าน Bluetooth (bpm = 0 คือหลุดการเชื่อมต่อ)
+app.post("/api/family-members/:memberId/live-hr", verifyUser, async (req, res) => {
+  const { memberId } = req.params;
+  const bpm = Math.round(Number(req.body?.bpm));
+  if (!Number.isFinite(bpm) || bpm < 0 || bpm > 250) {
+    return res.status(400).json({ error: "ค่าชีพจรไม่ถูกต้อง" });
+  }
+
+  try {
+    const [result] = bpm > 0
+      ? await db.execute(
+          `UPDATE family_members SET heart_rate = ?, status = ?, last_synced_at = NOW()
+           WHERE id = ? AND user_id = ?`,
+          [`${bpm} bpm`, bpm > 100 || bpm < 50 ? "อันตราย" : "ปกติ", memberId, req.user.id]
+        )
+      : await db.execute(
+          "UPDATE family_members SET heart_rate = '-' WHERE id = ? AND user_id = ?",
+          [memberId, req.user.id]
+        );
+    if (result.affectedRows === 0) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+    handleHeartRate(db, memberId, bpm);
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("Live HR error:", err);
+    return res.status(500).json({ error: "บันทึกชีพจรไม่สำเร็จ" });
   }
 });
 
@@ -679,6 +740,7 @@ app.post("/api/garmin/sync/:memberId", verifyUser, async (req, res) => {
       [updated.heart_rate, updated.steps, updated.sleep, updated.status, memberId, req.user.id]
     );
     await saveHealthHistory(memberId, hr, stepsNum, sleepHours ?? 0);
+    handleHeartRate(db, memberId, hr);
 
     return res.json({
       message: "ซิงค์ข้อมูลจาก Garmin สำเร็จ",
@@ -693,6 +755,66 @@ app.post("/api/garmin/sync/:memberId", verifyUser, async (req, res) => {
   }
 });
 // ===== [แก้ไข] จบ =====
+
+// Garmin ส่งข้อมูลมาเองแบบ push ต้องตอบ 200 ทันที ไม่งั้น Garmin จะส่งซ้ำและอาจปิด endpoint
+app.post("/api/garmin/webhook", (req, res) => {
+  res.sendStatus(200);
+  handleGarminPush(req.body).catch((err) => console.error("Garmin webhook error:", err));
+});
+
+async function findMemberIdByGarminUser(garminUserId) {
+  if (!garminUserId) return null;
+  const [rows] = await db.execute("SELECT id FROM family_members WHERE garmin_user_id = ?", [garminUserId]);
+  if (!rows[0]) console.warn("Garmin webhook: ไม่พบสมาชิกที่มี garmin_user_id =", garminUserId);
+  return rows[0]?.id ?? null;
+}
+
+async function handleGarminPush(body) {
+  const dailies = Array.isArray(body?.dailies) ? body.dailies : [];
+  const sleeps = Array.isArray(body?.sleeps) ? body.sleeps : [];
+  console.log(`Garmin webhook: dailies=${dailies.length}, sleeps=${sleeps.length}`);
+  const today = new Date().toISOString().split("T")[0];
+
+  for (const d of dailies) {
+    const memberId = await findMemberIdByGarminUser(d.userId);
+    if (!memberId) continue;
+
+    const hr = d.restingHeartRateInBeatsPerMinute ?? d.averageHeartRateInBeatsPerMinute ?? null;
+    const steps = d.steps ?? 0;
+    const status = hr && (hr > 100 || hr < 50) ? "อันตราย" : "ปกติ";
+
+    await db.execute(
+      `UPDATE family_members
+       SET heart_rate = ?, steps = ?, status = ?, is_connected = 1, last_synced_at = NOW()
+       WHERE id = ?`,
+      [hr ? `${hr} bpm` : "-", steps.toLocaleString("en-US"), status, memberId]
+    );
+    handleHeartRate(db, memberId, hr);
+    await db.execute(
+      `INSERT INTO health_history (member_id, record_date, avg_hr, steps)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE avg_hr = COALESCE(VALUES(avg_hr), avg_hr), steps = VALUES(steps)`,
+      [memberId, d.calendarDate || today, hr, steps]
+    );
+  }
+
+  for (const s of sleeps) {
+    const memberId = await findMemberIdByGarminUser(s.userId);
+    if (!memberId || !s.durationInSeconds) continue;
+
+    const sleepHours = +(s.durationInSeconds / 3600).toFixed(1);
+    await db.execute(
+      "UPDATE family_members SET sleep = ?, is_connected = 1, last_synced_at = NOW() WHERE id = ?",
+      [`${sleepHours} ชม.`, memberId]
+    );
+    await db.execute(
+      `INSERT INTO health_history (member_id, record_date, sleep_hours)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE sleep_hours = VALUES(sleep_hours)`,
+      [memberId, s.calendarDate || today, sleepHours]
+    );
+  }
+}
 
 app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
   const { memberId } = req.params;
@@ -732,6 +854,8 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
 
     const sleepHoursNum = parseFloat(String(sleep).replace(/[^0-9.]/g, "")) || 7.5;
     await saveHealthHistory(memberId, randomHr, newStepsNum, sleepHoursNum);
+    // ใช้ค่าที่บันทึกจริง (body.heart_rate ส่งค่ามาทดสอบแจ้งเตือนได้ เช่น "135 bpm")
+    handleHeartRate(db, memberId, parseInt(String(heartRate).replace(/[^0-9]/g, ""), 10));
 
     return res.json({ message: "Garmin mock sync success", data: { heartRate, steps, sleep, status } });
   } catch (err) {
@@ -811,14 +935,8 @@ app.get("/api/family-members/:memberId/readings", verifyUser, async (req, res) =
 });
 
 // ------------------------------------------
-// 7.2 รายงานสุขภาพ (หน้า "รายงาน")
+// 7.2 รายงานสุขภาพ (หน้า "รายงาน") — logic คำนวณอยู่ใน report.js ใช้ร่วมกับ LINE
 // ------------------------------------------
-const REPORT_PERIODS = [7, 30, 90];
-const SLEEP_GOAL = 7;
-
-const toDateKey = (d) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
 app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => {
   const { memberId } = req.params;
   const days = Number(req.query.days) || 30;
@@ -836,105 +954,7 @@ app.get("/api/family-members/:memberId/report", verifyUser, async (req, res) => 
       return res.status(404).json({ error: "ไม่พบสมาชิก" });
     }
 
-    await purgeOldReadings(db);
-
-    const today = startOfDay(new Date());
-    const from = new Date(today);
-    from.setDate(from.getDate() - (days - 1));
-    const prevFrom = new Date(from);
-    prevFrom.setDate(prevFrom.getDate() - days);
-
-    const [rows] = await db.execute(
-      `SELECT DATE_FORMAT(recorded_at, '%Y-%m-%d') AS day, type,
-              AVG(value) AS avg_value, MAX(value) AS max_value
-       FROM health_readings
-       WHERE member_id = ? AND recorded_at >= ? AND value IS NOT NULL
-       GROUP BY day, type`,
-      [memberId, from]
-    );
-
-    const byDay = {};
-    for (const r of rows) {
-      const d = (byDay[r.day] ??= {});
-      if (r.type === "heart_rate") {
-        d.avg_hr = Math.round(Number(r.avg_value));
-        d.max_hr = Number(r.max_value);
-      } else if (r.type === "steps") {
-        d.steps = Number(r.max_value);
-      } else if (r.type === "sleep") {
-        d.sleep = Number(r.max_value);
-      }
-    }
-
-    const daily = [];
-    for (let d = new Date(from); d <= today; d.setDate(d.getDate() + 1)) {
-      const key = toDateKey(d);
-      const v = byDay[key] ?? {};
-      daily.push({
-        date: key,
-        avg_hr: v.avg_hr ?? null,
-        max_hr: v.max_hr ?? null,
-        steps: v.steps ?? null,
-        sleep: v.sleep ?? null,
-      });
-    }
-
-    const average = (values) => {
-      const list = values.filter((v) => v !== null);
-      return list.length ? list.reduce((a, b) => a + b, 0) / list.length : null;
-    };
-    const avgHr = average(daily.map((d) => d.avg_hr));
-    const avgSteps = average(daily.map((d) => d.steps));
-    const avgSleep = average(daily.map((d) => d.sleep));
-
-    const [[prev]] = await db.execute(
-      `SELECT AVG(daily_steps) AS avg_steps FROM (
-         SELECT MAX(value) AS daily_steps FROM health_readings
-         WHERE member_id = ? AND type = 'steps' AND value IS NOT NULL
-           AND recorded_at >= ? AND recorded_at < ?
-         GROUP BY DATE(recorded_at)
-       ) t`,
-      [memberId, prevFrom, from]
-    );
-
-    const [[maxHr]] = await db.execute(
-      `SELECT value, recorded_at FROM health_readings
-       WHERE member_id = ? AND type = 'heart_rate' AND value IS NOT NULL AND recorded_at >= ?
-       ORDER BY value DESC, recorded_at DESC LIMIT 1`,
-      [memberId, from]
-    );
-
-    const [[alerts]] = await db.execute(
-      `SELECT
-         SUM(type = 'heart_rate' AND (value > 120 OR value < 50)) AS emergency,
-         SUM((type = 'heart_rate' AND ((value > 100 AND value <= 120) OR (value >= 50 AND value < 60)))
-             OR (type = 'stress' AND value > 70)) AS warning
-       FROM health_readings
-       WHERE member_id = ? AND recorded_at >= ? AND value IS NOT NULL`,
-      [memberId, from]
-    );
-
-    return res.json({
-      member,
-      days,
-      from: toDateKey(from),
-      to: toDateKey(today),
-      daily,
-      summary: {
-        avg_hr: avgHr === null ? null : Math.round(avgHr),
-        avg_steps: avgSteps === null ? null : Math.round(avgSteps),
-        prev_avg_steps: prev.avg_steps === null ? null : Math.round(Number(prev.avg_steps)),
-        avg_sleep: avgSleep === null ? null : Math.round(avgSleep * 10) / 10,
-        sleep_goal: SLEEP_GOAL,
-        sleep_days: daily.filter((d) => d.sleep !== null).length,
-        short_sleep_days: daily.filter((d) => d.sleep !== null && d.sleep < SLEEP_GOAL).length,
-        max_hr: maxHr ? { value: Number(maxHr.value), recorded_at: maxHr.recorded_at } : null,
-        alerts: {
-          warning: Number(alerts.warning ?? 0),
-          emergency: Number(alerts.emergency ?? 0),
-        },
-      },
-    });
+    return res.json(await buildMemberReport(db, member, days));
   } catch (err) {
     console.error("Fetch report error:", err);
     return res.status(500).json({ error: "ไม่สามารถดึงข้อมูลรายงานได้" });

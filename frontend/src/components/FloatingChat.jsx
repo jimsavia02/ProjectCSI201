@@ -21,7 +21,7 @@ function FloatingChat({ open, onToggle, badge = 0, title, subtitle, headerLeft, 
         <section
           role="dialog"
           aria-label={title}
-          className="fixed bottom-24 right-6 z-50 flex h-[min(560px,calc(100vh-8rem))] w-[min(380px,calc(100vw-3rem))] flex-col overflow-hidden rounded-3xl border border-pink-100 bg-white shadow-2xl shadow-pink-200/50"
+          className="fixed bottom-36 right-4 z-50 flex h-[min(560px,calc(100vh-11rem))] w-[min(380px,calc(100vw-2rem))] flex-col md:bottom-24 md:right-6 md:h-[min(560px,calc(100vh-8rem))] md:w-[min(380px,calc(100vw-3rem))] overflow-hidden rounded-3xl border border-pink-100 bg-white shadow-2xl shadow-pink-200/50"
         >
           <header className="flex items-center gap-2 bg-linear-to-r from-pink-400 to-pink-500 px-4 py-3 text-white">
             {headerLeft}
@@ -40,7 +40,7 @@ function FloatingChat({ open, onToggle, badge = 0, title, subtitle, headerLeft, 
       <button
         onClick={onToggle}
         aria-label={open ? "ปิดแชท" : label || "เปิดแชท"}
-        className="group fixed bottom-6 right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-pink-500 text-white shadow-lg shadow-pink-300 transition hover:scale-105 hover:bg-pink-600 cursor-pointer"
+        className="group fixed bottom-20 right-4 z-50 grid h-14 w-14 md:bottom-6 md:right-6 place-items-center rounded-full bg-pink-500 text-white shadow-lg shadow-pink-300 transition hover:scale-105 hover:bg-pink-600 cursor-pointer"
       >
         {/* ข้อความบอกว่าปุ่มนี้ไว้ทำอะไร: ขึ้นเฉพาะตอนเอาเมาส์ชี้ที่ปุ่ม */}
         {label && !open && (
