@@ -4,7 +4,7 @@ import {
   AreaChart, Area, BarChart, Bar, Cell, LabelList, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceDot, ReferenceLine,
 } from 'recharts'
-import { ArrowDown, HeartPulse, Moon, BellRing } from 'lucide-react'
+import { HeartPulse, Moon, BellRing } from 'lucide-react'
 import api, { getErrorMessage } from '../api.js'
 
 // ช่วงเวลาของรายงาน: tickEvery = แสดงวันที่บนแกน X ทุกกี่วัน
@@ -194,32 +194,12 @@ function Report() {
 
   return (
     <section className="text-[#3c3038]">
-      {/* ส่วนหัว: ชื่อหน้า + ปุ่ม Export */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold">รายงานสุขภาพ</h1>
-          <p className="mt-1.5 text-[#8e7c87]">
-            สรุปข้อมูลจาก Smart Watch ของ {member ? `${member.relation} (${member.name})` : '...'}
-          </p>
-        </div>
-
-        {/* ปุ่ม Export: ยังไม่ได้ทำฟีเจอร์ กดได้แต่ยังไม่มีอะไรเกิดขึ้น */}
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => {}}
-            className="flex cursor-pointer items-center gap-1.5 rounded-[15px] border-2 border-[#f6cedd] bg-white px-5 py-2.5 text-sm font-semibold text-[#f05289] transition hover:bg-[#fff5f8]"
-          >
-            <ArrowDown className="h-4 w-4" /> Export CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => {}}
-            className="flex cursor-pointer items-center gap-1.5 rounded-[15px] bg-linear-to-r from-[#ff83ad] to-[#f34c8c] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-pink-200 transition hover:brightness-95"
-          >
-            <ArrowDown className="h-4 w-4" /> Export PDF
-          </button>
-        </div>
+      {/* ส่วนหัว: ชื่อหน้า */}
+      <div>
+        <h1 className="text-3xl font-semibold">รายงานสุขภาพ</h1>
+        <p className="mt-1.5 text-[#8e7c87]">
+          สรุปข้อมูลจาก Smart Watch ของ {member ? `${member.relation} (${member.name})` : '...'}
+        </p>
       </div>
 
       {/* เลือกช่วงเวลา + สมาชิก / ช่วงวันที่ */}

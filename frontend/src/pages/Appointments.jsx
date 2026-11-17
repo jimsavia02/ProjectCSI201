@@ -24,6 +24,14 @@ const blockTyping = (e) => {
   if (e.key === 'Enter' || e.key === ' ') openPicker(e);
 };
 
+// เงื่อนไขการแจ้งเตือนรายสมาชิก (key ตรงกับ API /alert-settings) — บันทึกลงฐานข้อมูล และ server ใช้ตัดสินว่าจะแจ้ง LINE หรือไม่
+const ALERT_OPTIONS = [
+  { key: 'hrHigh', label: 'ชีพจรสูงผิดปกติ', desc: 'มากกว่า 120 bpm' },
+  { key: 'hrLow', label: 'ชีพจรต่ำผิดปกติ', desc: 'น้อยกว่า 50 bpm' },
+  { key: 'stress', label: 'ระดับความเครียดสูง', desc: 'มากกว่า 80 ต่อเนื่องเกิน 30 นาที' },
+  { key: 'fall', label: 'ตรวจพบการล้ม', desc: 'แจ้งเตือนทันที พร้อมเบอร์ผู้ติดต่อฉุกเฉิน' },
+];
+
 function Appointments() {
   const location = useLocation();
   const [preferredId] = useState(() => location.state?.memberId ?? null);
@@ -37,18 +45,12 @@ function Appointments() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-  const [alertSettings, setAlertSettings] = useState({
-    highHeartRate: true,
-    lowHeartRate: true,
-    highStress: true,
-    noWatchData: false,
-    fallDetected: true
-  });
+  const [alertSettings, setAlertSettings] = useState(null); // null = กำลังโหลด
+  const [savingAlerts, setSavingAlerts] = useState(false);
+  const [alertNote, setAlertNote] = useState({ type: '', text: '' });
 
   const [channels, setChannels] = useState({
-    app: true,
-    sms: false,
-    email: false
+    line: true
   });
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -94,10 +96,33 @@ function Appointments() {
     fetchAppointments();
   }, [selectedMemberId]);
 
+  // เข้ามาจากปุ่ม "เงื่อนไขการแจ้งเตือน" ในหน้าตั้งค่า (#alert-conditions) -> เลื่อนไปที่การ์ดนั้น
+  useEffect(() => {
+    if (loading || location.hash !== '#alert-conditions') return;
+    document.getElementById('alert-conditions')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [loading, location.hash]);
+
+  // โหลดเงื่อนไขการแจ้งเตือนของสมาชิกที่เลือก
+  useEffect(() => {
+    if (!selectedMemberId) return;
+    let ignore = false;
+    setAlertSettings(null);
+    setAlertNote({ type: '', text: '' });
+    api
+      .get(`/api/family-members/${selectedMemberId}/alert-settings`)
+      .then((res) => !ignore && setAlertSettings(res.data))
+      .catch((err) => {
+        if (ignore) return;
+        setAlertNote({ type: 'error', text: err.response?.data?.error || 'โหลดเงื่อนไขการแจ้งเตือนไม่สำเร็จ' });
+      });
+    return () => { ignore = true; };
+  }, [selectedMemberId]);
+
   const selectedMember = members.find(m => m.id === selectedMemberId);
 
   const handleToggleAlert = (key) => {
     setAlertSettings(prev => ({ ...prev, [key]: !prev[key] }));
+    setAlertNote({ type: '', text: '' });
   };
 
   const handleToggleChannel = (key) => {
@@ -149,8 +174,19 @@ function Appointments() {
     }
   };
 
-  const handleSaveSettings = () => {
-    alert(`บันทึกการตั้งค่าการแจ้งเตือนของ ${selectedMember?.name || 'สมาชิก'} เรียบร้อยแล้ว!`);
+  const handleSaveSettings = async () => {
+    if (!alertSettings) return;
+    setSavingAlerts(true);
+    try {
+      const { hrHigh, hrLow, stress, fall } = alertSettings;
+      const res = await api.put(`/api/family-members/${selectedMemberId}/alert-settings`, { hrHigh, hrLow, stress, fall });
+      setAlertSettings({ hrHigh: res.data.hrHigh, hrLow: res.data.hrLow, stress: res.data.stress, fall: res.data.fall });
+      setAlertNote({ type: 'success', text: `${res.data.message} (${selectedMember?.name || 'สมาชิก'})` });
+    } catch (err) {
+      setAlertNote({ type: 'error', text: err.response?.data?.error || 'บันทึกเงื่อนไขการแจ้งเตือนไม่สำเร็จ' });
+    } finally {
+      setSavingAlerts(false);
+    }
   };
 
   if (loading) {
@@ -361,138 +397,74 @@ function Appointments() {
         </div>
 
         <div className="lg:col-span-5 space-y-6">
-          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100">
+          <div id="alert-conditions" className="scroll-mt-6 bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100">
             <div className="mb-6">
               <h2 className="text-lg font-bold text-slate-800">เงื่อนไขการแจ้งเตือน</h2>
               <p className="text-xs text-slate-400">สำหรับ {selectedMember?.name || 'สมาชิก'}</p>
             </div>
 
-            <div className="space-y-5 divide-y divide-slate-100">
-              <div className="flex items-center justify-between pt-1">
-                <div>
-                  <p className="font-bold text-slate-800 text-xs">ชีพจรสูงผิดปกติ</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">มากกว่า 120 bpm นานเกิน 5 นาที</p>
-                </div>
-                <button
-                  onClick={() => handleToggleAlert('highHeartRate')}
-                  className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer ${
-                    alertSettings.highHeartRate ? 'bg-pink-500' : 'bg-slate-200'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                    alertSettings.highHeartRate ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
+            {!alertSettings ? (
+              <p className="text-xs text-slate-400">{alertNote.type === 'error' ? '' : 'กำลังโหลด...'}</p>
+            ) : (
+              <div className="space-y-5 divide-y divide-slate-100">
+                {ALERT_OPTIONS.map((option, i) => (
+                  <div key={option.key} className={`flex items-center justify-between ${i === 0 ? 'pt-1' : 'pt-4'}`}>
+                    <div>
+                      <p className="font-bold text-slate-800 text-xs">{option.label}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{option.desc}</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={alertSettings[option.key]}
+                      aria-label={option.label}
+                      onClick={() => handleToggleAlert(option.key)}
+                      className={`w-11 h-6 shrink-0 rounded-full transition-colors p-0.5 cursor-pointer ${
+                        alertSettings[option.key] ? 'bg-pink-500' : 'bg-slate-200'
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                        alertSettings[option.key] ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+                ))}
               </div>
-
-              <div className="flex items-center justify-between pt-4">
-                <div>
-                  <p className="font-bold text-slate-800 text-xs">ชีพจรต่ำผิดปกติ</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">น้อยกว่า 50 bpm</p>
-                </div>
-                <button
-                  onClick={() => handleToggleAlert('lowHeartRate')}
-                  className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer ${
-                    alertSettings.lowHeartRate ? 'bg-pink-500' : 'bg-slate-200'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                    alertSettings.lowHeartRate ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between pt-4">
-                <div>
-                  <p className="font-bold text-slate-800 text-xs">ระดับความเครียดสูง</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">มากกว่า 80 ติดต่อกัน 30 นาที</p>
-                </div>
-                <button
-                  onClick={() => handleToggleAlert('highStress')}
-                  className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer ${
-                    alertSettings.highStress ? 'bg-pink-500' : 'bg-slate-200'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                    alertSettings.highStress ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between pt-4">
-                <div>
-                  <p className="font-bold text-slate-800 text-xs">ไม่มีข้อมูลจากนาฬิกา</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">ขาดการเชื่อมต่อเกิน 6 ชั่วโมง</p>
-                </div>
-                <button
-                  onClick={() => handleToggleAlert('noWatchData')}
-                  className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer ${
-                    alertSettings.noWatchData ? 'bg-pink-500' : 'bg-slate-200'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                    alertSettings.noWatchData ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between pt-4">
-                <div>
-                  <p className="font-bold text-slate-800 text-xs">ตรวจพบการล้ม</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">แจ้งผู้ติดต่อฉุกเฉินทันที</p>
-                </div>
-                <button
-                  onClick={() => handleToggleAlert('fallDetected')}
-                  className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer ${
-                    alertSettings.fallDetected ? 'bg-pink-500' : 'bg-slate-200'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                    alertSettings.fallDetected ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-            </div>
+            )}
 
             <div className="mt-8 border-t border-slate-100 pt-6">
               <h4 className="font-bold text-slate-800 text-xs mb-3">ช่องทางแจ้งเตือน</h4>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleToggleChannel('app')}
+                  onClick={() => handleToggleChannel('line')}
                   className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    channels.app ? 'bg-pink-500 text-white shadow-sm' : 'bg-slate-100 text-slate-400'
+                    channels.line ? 'bg-pink-500 text-white shadow-sm' : 'bg-slate-100 text-slate-400'
                   }`}
                 >
-                  แอปพลิเคชัน
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleChannel('sms')}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    channels.sms ? 'bg-pink-500 text-white shadow-sm' : 'bg-slate-100 text-slate-400'
-                  }`}
-                >
-                  SMS
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleChannel('email')}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
-                    channels.email ? 'bg-pink-500 text-white shadow-sm' : 'bg-slate-100 text-slate-400'
-                  }`}
-                >
-                  อีเมล
+                  LINE
                 </button>
               </div>
             </div>
 
+            {alertNote.text && (
+              <p
+                role={alertNote.type === 'error' ? 'alert' : 'status'}
+                className={`mt-6 rounded-xl px-4 py-2.5 text-xs ${
+                  alertNote.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                {alertNote.text}
+              </p>
+            )}
+
             <div className="mt-6">
               <button
                 onClick={handleSaveSettings}
-                className="w-full py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold text-sm rounded-2xl shadow-md shadow-pink-200 transition cursor-pointer"
+                disabled={!alertSettings || savingAlerts}
+                className="w-full py-3 bg-pink-500 hover:bg-pink-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm rounded-2xl shadow-md shadow-pink-200 transition cursor-pointer"
               >
-                บันทึกการตั้งค่า
+                {savingAlerts ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
               </button>
             </div>
 

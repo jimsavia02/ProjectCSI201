@@ -6,6 +6,21 @@ import { Phone, Plus, Edit3, X, PhoneCall, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api.js';
 
+// ตัดหน่วยที่ติดมากับข้อความออก (บางที่บันทึกเป็น "5,200 ก้าว" / "7.5 ชม.") ไม่มีค่า = "-"
+const numberText = (v) => {
+  const text = String(v ?? '').replace(/[^\d.,]/g, '');
+  return text || '-';
+};
+
+// ระดับความเครียดแบบ Garmin (0-100)
+const stressLevel = (v) => {
+  if (v == null) return '';
+  if (v <= 25) return 'ผ่อนคลาย';
+  if (v <= 50) return 'ระดับต่ำ';
+  if (v <= 75) return 'ปานกลาง';
+  return 'สูง';
+};
+
 function Dashboard() {
   const navigate = useNavigate();
   const [members, setMembers] = useState([]);
@@ -196,7 +211,7 @@ function Dashboard() {
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
             <div>
               <p className="text-xs text-slate-400 font-medium">ก้าวเดิน</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">{memberData?.steps || '0'} <span className="text-xs font-normal text-slate-500">ก้าว</span></p>
+              <p className="text-xl font-bold text-slate-800 mt-1">{numberText(memberData?.steps)} <span className="text-xs font-normal text-slate-500">ก้าว</span></p>
             </div>
             <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">👟</div>
           </div>
@@ -204,7 +219,7 @@ function Dashboard() {
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
             <div>
               <p className="text-xs text-slate-400 font-medium">การนอน</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">{memberData?.sleep || '0'} <span className="text-xs font-normal text-slate-500">ชม.</span></p>
+              <p className="text-xl font-bold text-slate-800 mt-1">{numberText(memberData?.sleep)} <span className="text-xs font-normal text-slate-500">ชม.</span></p>
             </div>
             <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">🌙</div>
           </div>
@@ -212,7 +227,7 @@ function Dashboard() {
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
             <div>
               <p className="text-xs text-slate-400 font-medium">ความเครียด</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">42 <span className="text-xs font-normal text-slate-500">ระดับต่ำ</span></p>
+              <p className="text-xl font-bold text-slate-800 mt-1">{memberData?.stress ?? '-'} <span className="text-xs font-normal text-slate-500">{stressLevel(memberData?.stress)}</span></p>
             </div>
             <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">🧘</div>
           </div>
@@ -220,7 +235,7 @@ function Dashboard() {
           <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
             <div>
               <p className="text-xs text-slate-400 font-medium">ออกซิเจนในเลือด</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">98 <span className="text-xs font-normal text-slate-500">%</span></p>
+              <p className="text-xl font-bold text-slate-800 mt-1">{memberData?.spo2 ?? '-'} <span className="text-xs font-normal text-slate-500">%</span></p>
             </div>
             <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">⭕</div>
           </div>

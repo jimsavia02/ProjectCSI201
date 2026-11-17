@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   line_link_code VARCHAR(10) DEFAULT NULL,      -- รหัส 6 หลักชั่วคราวสำหรับจับคู่ LINE
   line_link_expires DATETIME DEFAULT NULL,
   line_snooze_until DATETIME DEFAULT NULL,      -- พิมพ์ "ปลอดภัย" ใน LINE -> หยุดแจ้งเตือนถึงเวลานี้
+  line_alerts_enabled TINYINT(1) NOT NULL DEFAULT 1, -- สวิตช์ในหน้าตั้งค่า: 0 = ไม่ส่งแจ้งเตือนชีพจรทาง LINE
   line_login_token CHAR(64) DEFAULT NULL,       -- sha256 ของ magic link จากปุ่มใน LINE (ใช้ได้ครั้งเดียว)
   line_login_expires DATETIME DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -35,6 +36,8 @@ CREATE TABLE IF NOT EXISTS family_members (
   heart_rate VARCHAR(20) DEFAULT '-',
   steps VARCHAR(20) DEFAULT '-',
   sleep VARCHAR(20) DEFAULT '-',
+  stress INT DEFAULT NULL, -- ความเครียดล่าสุด (0-100 แบบ Garmin)
+  spo2 INT DEFAULT NULL,   -- ออกซิเจนในเลือดล่าสุด (%)
   status VARCHAR(20) DEFAULT 'ไม่มีข้อมูล',
   is_connected TINYINT(1) DEFAULT 0,
   garmin_user_id VARCHAR(255) DEFAULT NULL,
@@ -43,6 +46,12 @@ CREATE TABLE IF NOT EXISTS family_members (
   garmin_token_expires_at BIGINT DEFAULT NULL,
   last_synced_at DATETIME DEFAULT NULL,
   last_alert_at DATETIME DEFAULT NULL, -- เวลาที่ส่งแจ้งเตือน LINE ล่าสุด
+  alert_hr_high TINYINT(1) NOT NULL DEFAULT 1, -- เงื่อนไขการแจ้งเตือน: ชีพจร > 120
+  alert_hr_low TINYINT(1) NOT NULL DEFAULT 1,  -- ชีพจร < 50
+  alert_stress TINYINT(1) NOT NULL DEFAULT 1,  -- ความเครียด > 80 ต่อเนื่องเกิน 30 นาที
+  alert_fall TINYINT(1) NOT NULL DEFAULT 1,    -- ตรวจพบการล้ม
+  hr_high_since DATETIME DEFAULT NULL,         -- (ไม่ได้ใช้แล้ว: เดิมใช้นับชีพจรสูงต่อเนื่อง)
+  stress_high_since DATETIME DEFAULT NULL,     -- ความเครียดเริ่มสูงต่อเนื่องตั้งแต่เมื่อไร
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

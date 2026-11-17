@@ -1,30 +1,9 @@
 import { useEffect, useState } from "react";
-import { useOutletContext } from "react-router-dom";
-import { KeyRound, MessageCircle } from "lucide-react";
+import { Link, useOutletContext } from "react-router-dom";
+import { BellRing, ChevronRight, KeyRound, MessageCircle } from "lucide-react";
 import api, { getErrorMessage } from "../api.js";
 
-// สวิตช์การแจ้งเตือน (ตอนนี้กดเปิด/ปิดได้อย่างเดียว ยังไม่ได้บันทึกและยังไม่ได้ส่งแจ้งเตือนจริง)
-// การแจ้งเตือนผ่าน LINE แยกไปอยู่ใน <LineConnect> ด้านล่าง
-const NOTIFICATION_OPTIONS = [
-  {
-    key: "app",
-    label: "แจ้งเตือนผ่านแอป",
-    desc: "รับการแจ้งเตือนทันที",
-    defaultOn: true,
-  },
-  {
-    key: "email",
-    label: "อีเมลสรุปรายสัปดาห์",
-    desc: "สรุปสุขภาพสมาชิกทุกคน",
-    defaultOn: false,
-  },
-  {
-    key: "share",
-    label: "แชร์ข้อมูลกับครอบครัว",
-    desc: "ให้สมาชิกที่เชิญดูข้อมูลได้",
-    defaultOn: true,
-  },
-];
+// สวิตช์ "แจ้งเตือนผ่านแอป" = เปิด/ปิดแจ้งเตือนชีพจรทาง LINE อยู่ใน <LineConnect>
 
 // สระบน/ล่าง ( ั ิ ี ึ ื ุ ู ฺ ) และวรรณยุกต์/เครื่องหมาย ( ็ ่ ้ ๊ ๋ ์ ํ ๎ )
 // ตัวพวกนี้วางเดี่ยวๆ ไม่ได้ จึงต้องตัดออกก่อนเลือกตัวอักษรมาแสดง
@@ -38,7 +17,7 @@ const initialsOf = (name = "") =>
 const inputClass =
   "w-full rounded-[14px] border border-[#f1dce5] bg-[#fff5f8] px-4 py-3 text-[#3c3038] outline-none placeholder:text-[#b8a4ae] focus:border-[#f66c9c] focus:ring-2 focus:ring-[#ffe3ed]";
 
-function Toggle({ checked, onChange, label }) {
+function Toggle({ checked, onChange, label, disabled = false }) {
   return (
     <button
       type="button"
@@ -46,7 +25,8 @@ function Toggle({ checked, onChange, label }) {
       aria-checked={checked}
       aria-label={label}
       onClick={onChange}
-      className={`relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors ${
+      disabled={disabled}
+      className={`relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? "bg-linear-to-r from-[#ff83ad] to-[#f34c8c]" : "bg-[#ece3e7]"
       }`}
     >
@@ -130,6 +110,15 @@ function LineConnect() {
       setNote({ type: "success", text: res.data.message });
     });
 
+  // สวิตช์ "แจ้งเตือนผ่านแอป": เปิด/ปิดการส่งแจ้งเตือนชีพจรไป LINE (บันทึกลงฐานข้อมูล)
+  const toggleAlerts = () =>
+    run(async () => {
+      const res = await api.put("/api/line/alerts", { enabled: !status.alertsEnabled });
+      setStatus((s) => ({ ...s, alertsEnabled: res.data.alertsEnabled }));
+      // เปิด = กล่องเขียว / ปิด = กล่องแดง
+      setNote({ type: res.data.alertsEnabled ? "success" : "off", text: res.data.message });
+    });
+
   const unlink = () =>
     run(async () => {
       if (!window.confirm("ยกเลิกการเชื่อม LINE? จะไม่ได้รับแจ้งเตือนอีก")) return;
@@ -151,9 +140,7 @@ function LineConnect() {
         <div className="min-w-0 flex-1">
           <p className="font-semibold">แจ้งเตือนผ่าน LINE</p>
           <p className="text-xs text-[#9d8994]">
-            {status?.thresholds
-              ? `แจ้งเมื่อชีพจรของสมาชิกในบัญชีนี้สูงกว่า ${status.thresholds.high} หรือต่ำกว่า ${status.thresholds.low} bpm`
-              : "แจ้งเมื่อชีพจรของสมาชิกในบัญชีนี้ผิดปกติ"}
+            แจ้งเมื่อสมาชิกในบัญชีนี้เข้าเงื่อนไขการแจ้งเตือน (ชีพจรสูง/ต่ำ ความเครียดสูง การล้ม)
           </p>
         </div>
         {status?.linked && (
@@ -167,7 +154,9 @@ function LineConnect() {
         <p
           role={note.type === "error" ? "alert" : "status"}
           className={`mt-3 rounded-xl px-4 py-2.5 text-sm ${
-            note.type === "error" ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+            note.type === "error" || note.type === "off"
+              ? "bg-red-50 text-red-700"
+              : "bg-emerald-50 text-emerald-700"
           }`}
         >
           {note.text}
@@ -179,9 +168,11 @@ function LineConnect() {
       ) : status.linked ? (
         <>
         <p className="mt-3 text-xs text-[#9d8994]">
-          {status.snoozedUntil
+          {!status.alertsEnabled
+            ? "🔕 ปิดการแจ้งเตือนชีพจรไว้ (ปุ่มเมนูในแชท LINE ยังใช้ได้ตามปกติ)"
+            : status.snoozedUntil
             ? `🔕 พักการแจ้งเตือนอยู่ถึง ${new Date(status.snoozedUntil).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`
-            : `แจ้งเตือนทุกครั้งที่เกินเกณฑ์ · พิมพ์ "${status.snoozeWord}" ใน LINE เพื่อพัก 10 นาที`}
+            : `ยังผิดปกติอยู่จะเตือนซ้ำทุก 10 นาที · พิมพ์ "${status.snoozeWord}" ใน LINE เพื่อพัก 10 นาที`}
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" onClick={sendTest} disabled={busy} className={smallBtn}>
@@ -235,6 +226,26 @@ function LineConnect() {
         >
           เชื่อม LINE
         </button>
+      )}
+
+      {/* สวิตช์เปิด/ปิดแจ้งเตือนทาง LINE (ต้องเชื่อม LINE ก่อนถึงจะกดได้) */}
+      {status?.enabled && (
+        <div className="-mb-4 mt-4 flex items-center justify-between gap-4 border-t border-[#f6e6ed] py-4">
+          <div>
+            <p className="font-semibold">แจ้งเตือนผ่านแอป</p>
+            <p className="text-xs text-[#9d8994]">
+              {status.linked
+                ? "เปิด = ส่งแจ้งเตือนชีพจรผิดปกติไปที่ LINE ทันที"
+                : "เชื่อม LINE ก่อน จึงจะเปิด/ปิดการแจ้งเตือนได้"}
+            </p>
+          </div>
+          <Toggle
+            label="แจ้งเตือนผ่านแอป"
+            checked={status.linked && status.alertsEnabled}
+            onChange={toggleAlerts}
+            disabled={!status.linked || busy}
+          />
+        </div>
       )}
     </div>
   );
@@ -429,9 +440,6 @@ function Setting() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
-  const [notifications, setNotifications] = useState(
-    Object.fromEntries(NOTIFICATION_OPTIONS.map((o) => [o.key, o.defaultOn])),
-  );
 
   // โหลดข้อมูลบัญชีปัจจุบันมาใส่ในฟอร์ม
   useEffect(() => {
@@ -631,29 +639,22 @@ function Setting() {
 
           <LineConnect />
 
-          <ul>
-            {NOTIFICATION_OPTIONS.map((option) => (
-              <li
-                key={option.key}
-                className="flex items-center justify-between gap-4 border-b border-[#f6e6ed] py-4"
-              >
-                <div>
-                  <p className="font-semibold">{option.label}</p>
-                  <p className="text-xs text-[#9d8994]">{option.desc}</p>
-                </div>
-                <Toggle
-                  label={option.label}
-                  checked={notifications[option.key]}
-                  onChange={() =>
-                    setNotifications({
-                      ...notifications,
-                      [option.key]: !notifications[option.key],
-                    })
-                  }
-                />
-              </li>
-            ))}
-          </ul>
+          {/* ไปการ์ด "เงื่อนไขการแจ้งเตือน" ในหน้านัดหมาย */}
+          <Link
+            to="/appointments#alert-conditions"
+            className="group flex items-center gap-3 border-b border-[#f6e6ed] py-4"
+          >
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#ffedf3] text-[#f05289]">
+              <BellRing className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">เงื่อนไขการแจ้งเตือน</span>
+              <span className="block text-xs text-[#9d8994]">
+                ตั้งค่าชีพจร ความเครียด และการล้มของสมาชิกแต่ละคน
+              </span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-[#c9b3bd] transition group-hover:translate-x-0.5 group-hover:text-[#f05289]" />
+          </Link>
 
           {/* ภาษา: ตอนนี้มีให้เลือกอย่างเดียว จึงแสดงเป็นข้อความ */}
           <dl className="mt-3">

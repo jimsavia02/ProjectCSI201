@@ -2,14 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Clock3, HeartPulse, Phone, PhoneCall, Siren, TriangleAlert, UserCheck } from "lucide-react";
 import api, { getErrorMessage } from "../../api.js";
 
-// หน้าติดตามเหตุฉุกเฉิน (admin): เคสชีพจรผิดปกติจากนาฬิกาจริง
+// หน้าติดตามเหตุฉุกเฉิน (admin): เคสชีพจรผิดปกติ / ความเครียดสูง / การล้ม
 // ดึงรายการใหม่ทุก 5 วินาที ตัวจับเวลา "รอ mm:ss" เดินทุกวินาที
 
 const POLL_MS = 5000;
 
-// ประเภทเคส (ตอนนี้มีแค่ชีพจรผิดปกติ) — type ที่ไม่รู้จักใช้ค่า hr ไปก่อน หน้าจะได้ไม่พัง
+// ประเภทเคส — type ที่ไม่รู้จักใช้ค่า hr ไปก่อน หน้าจะได้ไม่พัง
 const TYPES = {
-  hr: { label: "HR", long: "ชีพจรผิดปกติ", tile: "bg-pink-500 text-white", pill: "bg-pink-500 text-white" },
+  // metric/unit = ค่าที่เก็บในคอลัมน์ last_bpm / peak_bpm ของเคสนั้น
+  hr: { label: "HR", long: "ชีพจรผิดปกติ", metric: "ชีพจร", unit: " bpm", tile: "bg-pink-500 text-white", pill: "bg-pink-500 text-white" },
+  stress: { label: "เครียด", long: "ความเครียดสูง", metric: "ความเครียด", unit: "", tile: "bg-violet-500 text-white", pill: "bg-violet-500 text-white" },
+  fall: { label: "ล้ม", long: "ตรวจพบการล้ม", metric: "ชีพจร", unit: " bpm", tile: "bg-orange-600 text-white", pill: "bg-orange-600 text-white" },
 };
 const typeOf = (c) => TYPES[c.type] ?? TYPES.hr;
 
@@ -45,7 +48,8 @@ const timeText = (c, now) => {
 
 const caseSubtitle = (c) => {
   const parts = [];
-  if (c.last_bpm) parts.push(`ชีพจร ${c.last_bpm} bpm`);
+  const t = typeOf(c);
+  if (c.last_bpm) parts.push(`${t.metric} ${c.last_bpm}${t.unit}`);
   parts.push(`ผู้ดูแล: ${c.caregiver_name}`);
   return parts.join(" • ");
 };
@@ -145,9 +149,9 @@ function CaseDetail({ caseId, now, onChanged }) {
       {/* ข้อมูลที่มีจริงเท่านั้น (ไม่มี SpO2 / ตำแหน่ง / แบตเตอรี่ จากนาฬิกา) */}
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl bg-pink-50/70 p-3">
-          <p className="text-xs text-slate-400">ชีพจรล่าสุด</p>
-          <p className="text-lg font-bold text-pink-600">{c.last_bpm ?? "-"} bpm</p>
-          {c.peak_bpm && <p className="text-[11px] text-slate-400">ผิดปกติสุด {c.peak_bpm} bpm</p>}
+          <p className="text-xs text-slate-400">{type.metric}ล่าสุด</p>
+          <p className="text-lg font-bold text-pink-600">{c.last_bpm ?? "-"}{type.unit}</p>
+          {c.peak_bpm && <p className="text-[11px] text-slate-400">ผิดปกติสุด {c.peak_bpm}{type.unit}</p>}
         </div>
         <div className="rounded-2xl bg-pink-50/70 p-3">
           <p className="text-xs text-slate-400">ผู้ดูแล</p>
@@ -355,7 +359,7 @@ function AdminEmergency() {
 
       {/* ตัวเลขสรุปวันนี้ */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={HeartPulse} label="ชีพจรผิดปกติวันนี้" value={stats.today.total} tone="bg-pink-50 text-pink-500" />
+        <StatCard icon={HeartPulse} label="เหตุฉุกเฉินวันนี้" value={stats.today.total} tone="bg-pink-50 text-pink-500" />
         <StatCard icon={Clock3} label="ยังไม่มีผู้รับ" value={stats.open} tone="bg-red-50 text-red-500" />
         <StatCard icon={UserCheck} label="กำลังดูแล" value={stats.inProgress} tone="bg-amber-50 text-amber-600" />
         <StatCard icon={Check} label="รับเรื่องแล้ววันนี้" value={`${stats.today.acknowledged} / ${stats.today.total}`} tone="bg-emerald-50 text-emerald-600" />

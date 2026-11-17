@@ -10,7 +10,14 @@ import axios from "axios";
 import "dotenv/config";
 import { READING_TYPES, purgeOldReadings, syncMockReadings, startOfDay } from "./mockHealth.js";
 import { registerLineWebhook, registerLineRoutes, consumeLoginToken } from "./line.js";
-import { registerEmergencyRoutes, handleHeartRate } from "./emergency.js";
+import {
+  registerEmergencyRoutes,
+  registerAlertSettingRoutes,
+  handleHeartRate,
+  handleStress,
+  handleFall,
+  resendHeartRateAlert,
+} from "./emergency.js";
 import { REPORT_PERIODS, buildMemberReport, toDateKey } from "./report.js";
 
 // ------------------------------------------
@@ -121,6 +128,9 @@ registerLineRoutes(app, db, verifyUser);
 
 // เหตุฉุกเฉิน (หน้า admin): รายการเคส / รายละเอียด / เปลี่ยนสถานะ / บันทึกการประสานงาน
 registerEmergencyRoutes(app, db, verifyUser, verifyAdmin);
+
+// เงื่อนไขการแจ้งเตือนรายสมาชิก (เปิด/ปิด ชีพจรสูง / ชีพจรต่ำ / ความเครียด / การล้ม)
+registerAlertSettingRoutes(app, db, verifyUser);
 
 // ------------------------------------------
 // 4. Auth & User Routes
@@ -300,7 +310,7 @@ app.get("/api/family-members", verifyUser, async (req, res) => {
   try {
     const currentUserId = req.user.id;
     const [rows] = await db.execute(
-      `SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, status, is_connected,
+      `SELECT id, name, relation, avatar_text, device, heart_rate, steps, sleep, stress, spo2, status, is_connected,
               last_synced_at, emergency_contact_name, emergency_contact_phone
        FROM family_members WHERE user_id = ? ORDER BY id DESC`,
       [currentUserId]
@@ -856,11 +866,172 @@ app.post("/api/garmin/mock-sync/:memberId", verifyUser, async (req, res) => {
     await saveHealthHistory(memberId, randomHr, newStepsNum, sleepHoursNum);
     // ใช้ค่าที่บันทึกจริง (body.heart_rate ส่งค่ามาทดสอบแจ้งเตือนได้ เช่น "135 bpm")
     handleHeartRate(db, memberId, parseInt(String(heartRate).replace(/[^0-9]/g, ""), 10));
+    if (latest.stress != null) {
+      await db.execute("UPDATE family_members SET stress = ? WHERE id = ?", [latest.stress, memberId]);
+      handleStress(db, memberId, latest.stress);
+    }
 
     return res.json({ message: "Garmin mock sync success", data: { heartRate, steps, sleep, status } });
   } catch (err) {
     console.error("Mock Sync Error:", err);
     return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ผลการแจ้งเตือน -> ข้อความตอบกลับปุ่มจำลองใน Dev Mode
+const MOCK_NOTIFY_TEXT = {
+  sent: "เปิดเคสฉุกเฉินและส่งแจ้งเตือนทาง LINE แล้ว",
+  throttled: "เคสยังเปิดอยู่ เพิ่งเตือนไปไม่ถึง 10 นาที จึงยังไม่ส่ง LINE ซ้ำ",
+  snoozed: "เปิดเคสแล้ว แต่ผู้ดูแลพิมพ์ \"ปลอดภัย\" พักการแจ้งเตือนไว้",
+  not_linked: "เปิดเคสแล้ว แต่ยังไม่ได้เชื่อม LINE จึงไม่ได้ส่งแจ้งเตือน",
+  muted: "เปิดเคสแล้ว แต่ปิด \"แจ้งเตือนผ่านแอป\" ไว้ในหน้าตั้งค่า",
+  disabled: "เปิดเคสแล้ว แต่ระบบยังไม่ได้ตั้งค่า LINE",
+  error: "เปิดเคสแล้ว แต่ส่ง LINE ไม่สำเร็จ",
+  off: "ไม่ได้แจ้งเตือน เพราะปิดเงื่อนไขนี้ไว้ในหน้า \"เงื่อนไขการแจ้งเตือน\"",
+};
+const FALL_NOTIFY_TEXT = MOCK_NOTIFY_TEXT;
+
+// Dev Mode: ใส่ช่วงชีพจร (ต่ำสุด-สูงสุด) เอง -> server สุ่ม 1 ค่าในช่วงนั้นเป็นชีพจรตอนนี้
+// แล้วตัดสินตามเงื่อนไขการแจ้งเตือนจริง (สูงกว่า 120 / ต่ำกว่า 50 แจ้งทันที)
+const isBpm = (v) => Number.isInteger(v) && v >= 20 && v <= 250;
+
+app.post("/api/family-members/:memberId/mock-hr", verifyUser, async (req, res) => {
+  const bpmMin = Number(req.body?.bpmMin);
+  const bpmMax = Number(req.body?.bpmMax);
+  if (!isBpm(bpmMin) || !isBpm(bpmMax)) {
+    return res.status(400).json({ error: "ชีพจรต้องเป็นจำนวนเต็ม 20-250 bpm" });
+  }
+  if (bpmMin > bpmMax) return res.status(400).json({ error: "ชีพจรต่ำสุดต้องไม่มากกว่าสูงสุด" });
+  try {
+    const [[member]] = await db.execute(
+      "SELECT id, device FROM family_members WHERE id = ? AND user_id = ?",
+      [req.params.memberId, req.user.id]
+    );
+    if (!member) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+
+    const bpm = bpmMin + Math.floor(Math.random() * (bpmMax - bpmMin + 1));
+    await db.execute(
+      "INSERT INTO health_readings (member_id, type, value, source, recorded_at) VALUES (?, 'heart_rate', ?, ?, NOW())",
+      [member.id, bpm, member.device || "Smart Watch"]
+    );
+    await db.execute(
+      "UPDATE family_members SET heart_rate = ?, status = ?, is_connected = 1, last_synced_at = NOW() WHERE id = ?",
+      [`${bpm} bpm`, bpm > 100 || bpm < 50 ? "อันตราย" : "ปกติ", member.id]
+    );
+
+    const result = await handleHeartRate(db, member.id, bpm);
+    return res.json({
+      bpm,
+      notify: result,
+      message: MOCK_NOTIFY_TEXT[result] ?? "ไม่เข้าเงื่อนไขการแจ้งเตือน จึงไม่ได้แจ้ง",
+    });
+  } catch (err) {
+    console.error("Mock HR error:", err);
+    return res.status(500).json({ error: "จำลองชีพจรไม่สำเร็จ" });
+  }
+});
+
+// Dev Mode: สุ่มค่าสุขภาพอื่นๆ ในช่วง ต่ำสุด-สูงสุด (หน้าเว็บเรียกซ้ำทุก 3 วินาทีจนกดหยุด)
+//   column = คอลัมน์ใน family_members / reading = type ใน health_readings (null = ไม่เก็บประวัติ)
+//   decimals = ทศนิยม / format = ข้อความที่เก็บในคอลัมน์ (steps/sleep เก็บเป็นข้อความ)
+const MOCK_VITALS = {
+  steps: { column: "steps", reading: "steps", min: 0, max: 100000, decimals: 0, format: (v) => v.toLocaleString("en-US") },
+  sleep: { column: "sleep", reading: "sleep", min: 0, max: 24, decimals: 1, format: (v) => String(v) },
+  stress: { column: "stress", reading: "stress", min: 0, max: 100, decimals: 0, format: (v) => v },
+  spo2: { column: "spo2", reading: null, min: 50, max: 100, decimals: 0, format: (v) => v },
+};
+
+app.post("/api/family-members/:memberId/mock-vital", verifyUser, async (req, res) => {
+  const vital = MOCK_VITALS[req.body?.metric];
+  if (!vital) return res.status(400).json({ error: "ประเภทข้อมูลไม่ถูกต้อง" });
+  const min = Number(req.body?.min);
+  const max = Number(req.body?.max);
+  const inRange = (v) => Number.isFinite(v) && v >= vital.min && v <= vital.max;
+  if (!inRange(min) || !inRange(max)) {
+    return res.status(400).json({ error: `ค่าต้องอยู่ระหว่าง ${vital.min}-${vital.max}` });
+  }
+  if (min > max) return res.status(400).json({ error: "ค่าต่ำสุดต้องไม่มากกว่าสูงสุด" });
+
+  try {
+    const [[member]] = await db.execute(
+      "SELECT id, device FROM family_members WHERE id = ? AND user_id = ?",
+      [req.params.memberId, req.user.id]
+    );
+    if (!member) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+
+    const scale = 10 ** vital.decimals;
+    const lo = Math.ceil(min * scale);
+    const hi = Math.floor(max * scale);
+    if (lo > hi) return res.status(400).json({ error: "ช่วงค่าแคบเกินไป" });
+    const value = (lo + Math.floor(Math.random() * (hi - lo + 1))) / scale;
+
+    // column มาจาก MOCK_VITALS เท่านั้น (ไม่ได้มาจากผู้ใช้)
+    await db.execute(
+      `UPDATE family_members SET ${vital.column} = ?, is_connected = 1, last_synced_at = NOW() WHERE id = ?`,
+      [vital.format(value), member.id]
+    );
+    if (vital.reading) {
+      await db.execute(
+        "INSERT INTO health_readings (member_id, type, value, source, recorded_at) VALUES (?, ?, ?, ?, NOW())",
+        [member.id, vital.reading, value, member.device || "Smart Watch"]
+      );
+    }
+
+    // ความเครียด: ใช้เงื่อนไขการแจ้งเตือนจริง (สูงกว่า 80 ต่อเนื่องเกิน 30 นาที)
+    let message = "";
+    if (req.body.metric === "stress") {
+      const result = await handleStress(db, member.id, value);
+      message = MOCK_NOTIFY_TEXT[result] ?? (value > 80 ? "สูงกว่า 80 แล้ว รอให้ต่อเนื่องครบ 30 นาทีจึงจะแจ้ง" : "");
+    }
+    return res.json({ value: vital.format(value), message });
+  } catch (err) {
+    console.error("Mock vital error:", err);
+    return res.status(500).json({ error: "จำลองข้อมูลไม่สำเร็จ" });
+  }
+});
+
+// Dev Mode: กดส่งแจ้งเตือน LINE ด้วยชีพจรค่าล่าสุดทันที (ข้ามการรอเตือนซ้ำ 10 นาที)
+const RESEND_TEXT = {
+  sent: "ส่งแจ้งเตือนค่าล่าสุดทาง LINE แล้ว",
+  normal: "ชีพจรล่าสุดปกติแล้ว ไม่ต้องแจ้งเตือน",
+  no_case: "ไม่มีเคสชีพจรผิดปกติที่เปิดอยู่ (อาจปิดเงื่อนไขไว้ หรือ admin ปิดเคสแล้ว)",
+  snoozed: "ผู้ดูแลพิมพ์ \"ปลอดภัย\" พักการแจ้งเตือนไว้",
+  not_linked: "ยังไม่ได้เชื่อม LINE",
+  muted: "ปิด \"แจ้งเตือนผ่านแอป\" ไว้ในหน้าตั้งค่า",
+  disabled: "ระบบยังไม่ได้ตั้งค่า LINE",
+  error: "ส่ง LINE ไม่สำเร็จ",
+};
+
+app.post("/api/family-members/:memberId/resend-alert", verifyUser, async (req, res) => {
+  try {
+    const [[member]] = await db.execute(
+      "SELECT id FROM family_members WHERE id = ? AND user_id = ?",
+      [req.params.memberId, req.user.id]
+    );
+    if (!member) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+    const { notify, bpm } = await resendHeartRateAlert(db, member.id);
+    return res.json({ notify, bpm, message: RESEND_TEXT[notify] ?? "ส่งแจ้งเตือนไม่สำเร็จ" });
+  } catch (err) {
+    console.error("Resend alert error:", err);
+    return res.status(500).json({ error: "ส่งแจ้งเตือนไม่สำเร็จ" });
+  }
+});
+
+// Dev Mode: จำลองการล้ม -> เปิดเคสฉุกเฉิน type 'fall' + แจ้ง LINE ผู้ดูแล
+
+app.post("/api/family-members/:memberId/mock-fall", verifyUser, async (req, res) => {
+  try {
+    const [[member]] = await db.execute(
+      "SELECT id FROM family_members WHERE id = ? AND user_id = ?",
+      [req.params.memberId, req.user.id]
+    );
+    if (!member) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+
+    const { caseId, notify } = await handleFall(db, member.id, "จำลองจาก Dev Mode");
+    return res.json({ caseId, notify, message: FALL_NOTIFY_TEXT[notify] });
+  } catch (err) {
+    console.error("Mock fall error:", err);
+    return res.status(500).json({ error: "จำลองการล้มไม่สำเร็จ" });
   }
 });
 

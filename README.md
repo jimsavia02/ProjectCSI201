@@ -70,3 +70,35 @@ UPDATE signup_login.users SET role = 'admin' WHERE email = 'อีเมลข�
 
 npm run seed:health -- --member=10 --days=30
 ดูเลข member ใน phpadmin นะ
+
+## เชื่อม LINE แจ้งเตือน
+
+ต้องมี `LINE_CHANNEL_SECRET` และ `LINE_CHANNEL_ACCESS_TOKEN` ใน `server/.env` ก่อน
+
+1. เปิด tunnel ให้ LINE เข้าถึงเครื่องเราได้ (เปิดค้างไว้ ห้ามปิด):
+
+   ```bash
+   cloudflared tunnel --url http://[::1]:5173
+   ```
+
+2. ได้ลิงก์ `https://xxxx.trycloudflare.com` → ใส่ใน `server/.env`:
+
+   ```env
+   PUBLIC_WEB_URL=https://xxxx.trycloudflare.com
+   ```
+
+3. [LINE Developers Console](https://developers.line.biz/console) → แท็บ **Messaging API** → Webhook URL ใส่ `https://xxxx.trycloudflare.com/api/line/webhook` → กด **Update** → เปิด **Use webhook**
+4. แอดบอท LINE → เข้าเว็บ (ลิงก์ tunnel) → **ตั้งค่า** → **เชื่อม LINE** → พิมพ์รหัส 6 หลักในแชทบอท
+
+> ลิงก์ tunnel เปลี่ยนทุกครั้งที่เปิดใหม่ → ต้องทำข้อ 2–3 ใหม่ทุกรอบ
+
+**เปิด/ปิดแจ้งเตือน:** ทั้งบัญชี = สวิตช์ "แจ้งเตือนผ่านแอป" หน้า **ตั้งค่า** · รายสมาชิก = "เงื่อนไขการแจ้งเตือน" หน้า **นัดหมาย** (กดบันทึก)
+**ใน LINE:** ตอบ "ปลอดภัย" = พักแจ้งเตือน 10 นาที
+
+## Dev Mode (ทดสอบแจ้งเตือน)
+
+หน้า **สมาชิก** กด **Ctrl + Shift + D**
+
+- **▶️ เริ่มสุ่มทั้งหมด** – กรอกช่วง ต่ำสุด–สูงสุด ของแต่ละค่า แล้วสุ่มทุก 3 วิ (ชีพจร > 120 หรือ < 50 จะแจ้ง LINE)
+- **🚨 จำลองการล้ม** – เปิดเคสฉุกเฉิน + แจ้ง LINE
+- เคสที่เกิดขึ้นดูได้ที่หน้า admin → **เหตุฉุกเฉิน**

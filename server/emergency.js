@@ -6,7 +6,15 @@
 // ผู้ดูแล (เจ้าของสมาชิก) รับเรื่องได้ด้วยการตอบ "ปลอดภัย" ใน LINE / admin เปลี่ยนสถานะและบันทึกการประสานงานได้
 // ทุกการเปลี่ยนแปลงลงไทม์ไลน์ใน emergency_case_events
 // ------------------------------------------
-import { notifyHeartRate, HR_HIGH, HR_LOW } from "./line.js";
+import {
+  notifyHeartRate,
+  notifyStress,
+  notifyFall,
+  HR_HIGH,
+  HR_LOW,
+  STRESS_HIGH,
+  STRESS_MINUTES,
+} from "./line.js";
 
 const STATUSES = ["open", "in_progress", "closed"];
 const STATUS_LABEL = { open: "ยังไม่มีผู้รับ", in_progress: "กำลังดูแล", closed: "ปิดแล้ว" };
@@ -17,6 +25,7 @@ const MAX_NOTE_LENGTH = 500;
 const NOTIFY_EVENT = {
   sent: "ส่งแจ้งเตือนทาง LINE ถึงผู้ดูแลแล้ว",
   not_linked: "ส่งแจ้งเตือน LINE ไม่ได้ — ผู้ดูแลยังไม่ได้เชื่อม LINE",
+  muted: "ไม่ได้ส่งแจ้งเตือน LINE — ผู้ดูแลปิดการแจ้งเตือนไว้ในหน้าตั้งค่า",
   disabled: "ส่งแจ้งเตือน LINE ไม่ได้ — ระบบยังไม่ได้ตั้งค่า LINE",
   error: "ส่งแจ้งเตือน LINE ไม่สำเร็จ",
 };
@@ -39,48 +48,206 @@ async function logFirstNotify(db, caseId, result) {
   if (!seen) await addEvent(db, caseId, "line", message);
 }
 
-// เรียกทุกครั้งที่ได้ค่าชีพจรใหม่ (แทน notifyHeartRate เดิม) ไม่ throw
-//   ผิดปกติ + ยังไม่มีเคสที่เปิดอยู่ -> เปิดเคสใหม่ / มีอยู่แล้ว -> อัปเดตค่าล่าสุด
-//   กลับมาปกติ -> ลงไทม์ไลน์ครั้งเดียว แต่ไม่ปิดเคสเอง (ให้คนยืนยัน)
+// เปิด/อัปเดตเคสของเงื่อนไขต่อเนื่อง 1 ประเภท (hr / stress) แล้วแจ้ง LINE
+//   เข้าเงื่อนไข + ยังไม่มีเคสที่เปิดอยู่ -> เปิดเคสใหม่ + แจ้ง LINE
+//   มีเคสอยู่แล้ว -> อัปเดตค่าล่าสุด + เตือนซ้ำ (line.js จำกัดไม่ถี่กว่าทุก 10 นาที)
+//   ไม่เข้าเงื่อนไขแล้ว -> ลงไทม์ไลน์ครั้งเดียว แต่ไม่ปิดเคสเอง (ให้คนยืนยัน)
+// ค่า (ชีพจร หรือ ระดับเครียด) เก็บในคอลัมน์ bpm / peak_bpm / last_bpm ของเคส
+// คืนผลการแจ้ง LINE ("sent", "not_linked", ...) หรือ null ถ้าไม่ได้แจ้ง
+async function trackCase(db, memberId, type, value, abnormal, { higherIsWorse, notify, text }) {
+  const [[active]] = await db.execute(
+    "SELECT id, recovered_at FROM emergency_cases WHERE member_id = ? AND type = ? AND status <> 'closed' ORDER BY id DESC LIMIT 1",
+    [memberId, type]
+  );
+
+  if (!abnormal) {
+    if (active && !active.recovered_at) {
+      await db.execute("UPDATE emergency_cases SET last_bpm = ?, last_bpm_at = NOW(), recovered_at = NOW() WHERE id = ?", [value, active.id]);
+      await addEvent(db, active.id, "recovered", text.recovered);
+    }
+    return null;
+  }
+
+  let caseId = active?.id;
+  let fresh = true; // เคสใหม่ หรือกลับมาผิดปกติอีกครั้ง = แจ้งทันที
+  if (caseId) {
+    await db.execute(
+      `UPDATE emergency_cases SET last_bpm = ?, last_bpm_at = NOW(),
+         peak_bpm = IF(?, GREATEST(COALESCE(peak_bpm, 0), ?), LEAST(COALESCE(peak_bpm, 999), ?)), recovered_at = NULL
+       WHERE id = ?`,
+      [value, higherIsWorse ? 1 : 0, value, value, caseId]
+    );
+    if (active.recovered_at) await addEvent(db, caseId, type, text.again);
+    else fresh = false;
+  } else {
+    const [ins] = await db.execute(
+      "INSERT INTO emergency_cases (member_id, type, bpm, peak_bpm, last_bpm, last_bpm_at) VALUES (?, ?, ?, ?, ?, NOW())",
+      [memberId, type, value, value, value]
+    );
+    caseId = ins.insertId;
+    await addEvent(db, caseId, "created", text.created);
+  }
+
+  const result = await notify({ reminder: !fresh });
+  await logFirstNotify(db, caseId, result);
+  return result;
+}
+
+// อัปเดตเวลาที่ค่าเริ่มสูงต่อเนื่อง (คอลัมน์ *_since) คืน true ถ้าสูงต่อเนื่องครบ minutes นาทีแล้ว
+// column มาจากโค้ดเท่านั้น (hr_high_since / stress_high_since) ไม่ได้มาจากผู้ใช้
+async function sustainedHigh(db, memberId, column, isHigh, minutes) {
+  if (!isHigh) {
+    await db.execute(`UPDATE family_members SET ${column} = NULL WHERE id = ? AND ${column} IS NOT NULL`, [memberId]);
+    return false;
+  }
+  await db.execute(`UPDATE family_members SET ${column} = COALESCE(${column}, NOW()) WHERE id = ?`, [memberId]);
+  const [[row]] = await db.execute(
+    `SELECT ${column} <= NOW() - INTERVAL ${minutes} MINUTE AS done FROM family_members WHERE id = ?`,
+    [memberId]
+  );
+  return Boolean(row?.done);
+}
+
+// เรียกทุกครั้งที่ได้ค่าชีพจรใหม่ ไม่ throw
+//   ชีพจรสูง: > 120 แจ้งทันที (ถ้าเปิด alert_hr_high)
+//   ชีพจรต่ำ: < 50 แจ้งทันที (ถ้าเปิด alert_hr_low)
+// คืนผลการแจ้ง LINE / "off" = เข้าเงื่อนไขแต่ปิดสวิตช์ไว้ / null = ไม่เข้าเงื่อนไข
 export async function handleHeartRate(db, memberId, bpm) {
   try {
-    if (!Number.isFinite(bpm) || bpm <= 0) return;
-    const abnormal = bpm > HR_HIGH || bpm < HR_LOW;
+    if (!Number.isFinite(bpm) || bpm <= 0) return null;
+    const [[m]] = await db.execute("SELECT alert_hr_high, alert_hr_low FROM family_members WHERE id = ?", [memberId]);
+    if (!m) return null;
 
-    const [[active]] = await db.execute(
-      "SELECT id, recovered_at FROM emergency_cases WHERE member_id = ? AND type = 'hr' AND status <> 'closed' ORDER BY id DESC LIMIT 1",
-      [memberId]
-    );
+    const isHigh = bpm > HR_HIGH;
+    const isLow = bpm < HR_LOW;
+    const abnormal = (isHigh && m.alert_hr_high) || (isLow && m.alert_hr_low);
+    const conditionMet = isHigh || isLow;
 
-    if (!abnormal) {
-      if (active && !active.recovered_at) {
-        await db.execute("UPDATE emergency_cases SET last_bpm = ?, last_bpm_at = NOW(), recovered_at = NOW() WHERE id = ?", [bpm, active.id]);
-        await addEvent(db, active.id, "recovered", `ชีพจรกลับมาปกติ ${bpm} bpm`);
-      }
-      return;
-    }
-
-    let caseId = active?.id;
-    if (caseId) {
-      await db.execute(
-        "UPDATE emergency_cases SET last_bpm = ?, last_bpm_at = NOW(), peak_bpm = IF(? > ?, GREATEST(COALESCE(peak_bpm, 0), ?), LEAST(COALESCE(peak_bpm, 999), ?)), recovered_at = NULL WHERE id = ?",
-        [bpm, bpm, HR_HIGH, bpm, bpm, caseId]
-      );
-      if (active.recovered_at) await addEvent(db, caseId, "hr", `ชีพจรผิดปกติอีกครั้ง ${bpm} bpm`);
-    } else {
-      const [ins] = await db.execute(
-        "INSERT INTO emergency_cases (member_id, type, bpm, peak_bpm, last_bpm, last_bpm_at) VALUES (?, 'hr', ?, ?, ?, NOW())",
-        [memberId, bpm, bpm, bpm]
-      );
-      caseId = ins.insertId;
-      const direction = bpm > HR_HIGH ? `สูงกว่าเกณฑ์ ${HR_HIGH}` : `ต่ำกว่าเกณฑ์ ${HR_LOW}`;
-      await addEvent(db, caseId, "created", `นาฬิกาตรวจพบชีพจรผิดปกติ ${bpm} bpm (${direction})`);
-    }
-
-    await logFirstNotify(db, caseId, await notifyHeartRate(db, memberId, bpm));
+    const result = await trackCase(db, memberId, "hr", bpm, Boolean(abnormal), {
+      higherIsWorse: bpm > HR_HIGH,
+      notify: (opts) => notifyHeartRate(db, memberId, bpm, opts),
+      text: {
+        created: isLow
+          ? `นาฬิกาตรวจพบชีพจรต่ำ ${bpm} bpm (ต่ำกว่า ${HR_LOW})`
+          : `นาฬิกาตรวจพบชีพจรสูง ${bpm} bpm (สูงกว่า ${HR_HIGH})`,
+        again: `ชีพจรผิดปกติอีกครั้ง ${bpm} bpm`,
+        recovered: conditionMet ? `ปิดเงื่อนไขการแจ้งเตือนนี้แล้ว (ชีพจร ${bpm} bpm)` : `ชีพจรกลับมาปกติ ${bpm} bpm`,
+      },
+    });
+    return result ?? (conditionMet ? "off" : null);
   } catch (err) {
     console.error("Emergency heart rate error:", err);
+    return "error";
   }
+}
+
+// กดส่งแจ้งเตือนชีพจรล่าสุดซ้ำทันที (ไม่ต้องรอครบ 10 นาที) — ใช้จากปุ่มใน Dev Mode
+// ส่งได้เฉพาะตอนมีเคสชีพจรที่ยังเปิดอยู่ และค่าล่าสุดยังผิดปกติ (ยังเคารพ "ปลอดภัย" / สวิตช์ปิดแจ้งเตือน)
+// คืน { notify, bpm } โดย notify = ผลการส่ง LINE หรือ "no_case" / "normal"
+export async function resendHeartRateAlert(db, memberId) {
+  const [[m]] = await db.execute("SELECT heart_rate FROM family_members WHERE id = ?", [memberId]);
+  const bpm = parseInt(String(m?.heart_rate ?? "").replace(/[^0-9]/g, ""), 10);
+  if (!Number.isFinite(bpm) || (bpm <= HR_HIGH && bpm >= HR_LOW)) return { notify: "normal", bpm };
+
+  const [[active]] = await db.execute(
+    "SELECT id FROM emergency_cases WHERE member_id = ? AND type = 'hr' AND status <> 'closed' AND recovered_at IS NULL ORDER BY id DESC LIMIT 1",
+    [memberId]
+  );
+  if (!active) return { notify: "no_case", bpm };
+
+  const notify = await notifyHeartRate(db, memberId, bpm); // ไม่ใช่ reminder = ไม่ติดเงื่อนไข 10 นาที
+  if (notify === "sent") await addEvent(db, active.id, "line", `ส่งแจ้งเตือนซ้ำทาง LINE (ชีพจร ${bpm} bpm)`);
+  return { notify, bpm };
+}
+
+// เรียกทุกครั้งที่ได้ค่าความเครียดใหม่ ไม่ throw
+//   ความเครียด > 80 ต่อเนื่องเกิน 30 นาที (ถ้าเปิด alert_stress) คืนค่าแบบเดียวกับ handleHeartRate
+export async function handleStress(db, memberId, level) {
+  try {
+    if (!Number.isFinite(level) || level < 0) return null;
+    const [[m]] = await db.execute("SELECT alert_stress FROM family_members WHERE id = ?", [memberId]);
+    if (!m) return null;
+
+    const sustained = await sustainedHigh(db, memberId, "stress_high_since", level > STRESS_HIGH, STRESS_MINUTES);
+    const result = await trackCase(db, memberId, "stress", level, Boolean(sustained && m.alert_stress), {
+      higherIsWorse: true,
+      notify: (opts) => notifyStress(db, memberId, level, opts),
+      text: {
+        created: `ตรวจพบความเครียดสูง ${level} (สูงกว่า ${STRESS_HIGH} ต่อเนื่องเกิน ${STRESS_MINUTES} นาที)`,
+        again: `ความเครียดสูงอีกครั้ง ${level}`,
+        recovered: sustained ? `ปิดเงื่อนไขการแจ้งเตือนนี้แล้ว (ความเครียด ${level})` : `ความเครียดลดลงเป็น ${level}`,
+      },
+    });
+    return result ?? (sustained ? "off" : null);
+  } catch (err) {
+    console.error("Emergency stress error:", err);
+    return "error";
+  }
+}
+
+// ---------- สวิตช์เงื่อนไขการแจ้งเตือนรายสมาชิก (หน้านัดหมาย) ----------
+const ALERT_COLUMNS = { hrHigh: "alert_hr_high", hrLow: "alert_hr_low", stress: "alert_stress", fall: "alert_fall" };
+
+export function registerAlertSettingRoutes(app, db, verifyUser) {
+  const loadSettings = async (memberId, userId) => {
+    const [[row]] = await db.execute(
+      `SELECT ${Object.values(ALERT_COLUMNS).join(", ")} FROM family_members WHERE id = ? AND user_id = ?`,
+      [memberId, userId]
+    );
+    return row ? Object.fromEntries(Object.entries(ALERT_COLUMNS).map(([key, col]) => [key, Boolean(row[col])])) : null;
+  };
+
+  app.get("/api/family-members/:memberId/alert-settings", verifyUser, async (req, res) => {
+    try {
+      const settings = await loadSettings(req.params.memberId, req.user.id);
+      if (!settings) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+      return res.json(settings);
+    } catch (err) {
+      console.error("Alert settings load error:", err);
+      return res.status(500).json({ error: "โหลดเงื่อนไขการแจ้งเตือนไม่สำเร็จ" });
+    }
+  });
+
+  app.put("/api/family-members/:memberId/alert-settings", verifyUser, async (req, res) => {
+    const body = req.body ?? {};
+    if (!Object.keys(ALERT_COLUMNS).every((key) => typeof body[key] === "boolean")) {
+      return res.status(400).json({ error: "ค่าไม่ถูกต้อง" });
+    }
+    try {
+      const [result] = await db.execute(
+        `UPDATE family_members SET ${Object.values(ALERT_COLUMNS).map((col) => `${col} = ?`).join(", ")}
+         WHERE id = ? AND user_id = ?`,
+        [...Object.keys(ALERT_COLUMNS).map((key) => (body[key] ? 1 : 0)), req.params.memberId, req.user.id]
+      );
+      if (result.affectedRows === 0) return res.status(404).json({ error: "ไม่พบสมาชิก" });
+      return res.json({ ...(await loadSettings(req.params.memberId, req.user.id)), message: "บันทึกเงื่อนไขการแจ้งเตือนแล้ว" });
+    } catch (err) {
+      console.error("Alert settings save error:", err);
+      return res.status(500).json({ error: "บันทึกเงื่อนไขการแจ้งเตือนไม่สำเร็จ" });
+    }
+  });
+}
+
+// ตรวจพบการล้ม: เปิดเคสใหม่ทุกครั้ง (ล้มแต่ละครั้งคือคนละเหตุการณ์) แล้วแจ้ง LINE
+// source บอกที่มา เช่น "จำลองจาก Dev Mode" (อนาคตนาฬิกา/มือถือเรียกฟังก์ชันนี้แทนได้เลย)
+// คืน { caseId, notify } ให้ route ตอบกลับหน้าเว็บ
+export async function handleFall(db, memberId, source) {
+  const [[member]] = await db.execute("SELECT heart_rate, alert_fall FROM family_members WHERE id = ?", [memberId]);
+  if (!member?.alert_fall) return { caseId: null, notify: "off" }; // ปิดเงื่อนไข "ตรวจพบการล้ม" ไว้
+
+  const bpm = parseInt(String(member?.heart_rate ?? "").replace(/[^0-9]/g, ""), 10) || null; // ชีพจรตอนล้ม (ถ้ามี)
+
+  const [ins] = await db.execute(
+    "INSERT INTO emergency_cases (member_id, type, bpm, last_bpm, last_bpm_at) VALUES (?, 'fall', ?, ?, IF(? IS NULL, NULL, NOW()))",
+    [memberId, bpm, bpm, bpm]
+  );
+  const caseId = ins.insertId;
+  await addEvent(db, caseId, "created", `ตรวจพบการล้ม${source ? ` (${source})` : ""}`);
+
+  const notify = await notifyFall(db, memberId);
+  const message = NOTIFY_EVENT[notify];
+  if (message) await addEvent(db, caseId, "line", message);
+  return { caseId, notify };
 }
 
 // ผู้ดูแลตอบ "ปลอดภัย" ใน LINE -> รับเรื่องเคสที่ยังไม่มีผู้รับของสมาชิกในบัญชีนั้น คืนจำนวนเคส

@@ -166,3 +166,31 @@ CREATE TABLE IF NOT EXISTS emergency_case_events (
   FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_case_time (case_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ===================================================
+-- 13. สวิตช์เปิด/ปิดแจ้งเตือนชีพจรทาง LINE (หน้าตั้งค่า)
+-- ===================================================
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS line_alerts_enabled TINYINT(1) NOT NULL DEFAULT 1;
+
+
+-- ===================================================
+-- 14. เงื่อนไขการแจ้งเตือนรายสมาชิก (หน้านัดหมาย "เงื่อนไขการแจ้งเตือน")
+-- ===================================================
+-- alert_* = สวิตช์เปิด/ปิดแต่ละเงื่อนไข / *_since = เริ่มสูงต่อเนื่องตั้งแต่เมื่อไร (NULL = ตอนนี้ไม่สูง)
+ALTER TABLE family_members
+  ADD COLUMN IF NOT EXISTS alert_hr_high TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS alert_hr_low TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS alert_stress TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS alert_fall TINYINT(1) NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS hr_high_since DATETIME DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS stress_high_since DATETIME DEFAULT NULL;
+
+
+-- ===================================================
+-- 15. ค่าล่าสุดของความเครียดและออกซิเจนในเลือด (การ์ดหน้า Dashboard)
+-- ===================================================
+ALTER TABLE family_members
+  ADD COLUMN IF NOT EXISTS stress INT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS spo2 INT DEFAULT NULL;

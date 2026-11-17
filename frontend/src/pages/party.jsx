@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   Heart, 
@@ -72,6 +72,173 @@ function InfoRow({ label, children }) {
   );
 }
 
+// Dev Mode: ค่าที่สุ่มได้ (hr ใช้ API /mock-hr ที่ตัดสินการแจ้งเตือนชีพจร / ที่เหลือใช้ /mock-vital)
+const MOCK_METRICS = [
+  { metric: 'hr', label: 'ชีพจร', unit: 'bpm', min: 20, max: 250, step: 1, defaults: ['60', '100'] },
+  { metric: 'steps', label: 'ก้าวเดิน', unit: 'ก้าว', min: 0, max: 100000, step: 1, defaults: ['3000', '8000'] },
+  { metric: 'sleep', label: 'การนอน', unit: 'ชม.', min: 0, max: 24, step: 0.1, defaults: ['5', '9'] },
+  { metric: 'stress', label: 'ความเครียด', unit: '', min: 0, max: 100, step: 1, defaults: ['20', '60'] },
+  { metric: 'spo2', label: 'ออกซิเจน', unit: '%', min: 50, max: 100, step: 1, defaults: ['94', '99'] },
+];
+const MOCK_RANDOM_MS = 3000;
+
+// แผงสุ่มค่าทุกอย่างด้วยปุ่มเดียว: ใส่ช่วง ต่ำสุด-สูงสุด ของแต่ละค่า -> สุ่มส่งไป server ทุก 3 วินาทีจนกดหยุด
+// แก้ช่วงระหว่างสุ่มได้ (อ่านผ่าน ref) / ออกจากหน้า = หยุดเอง
+function MockRandomPanel({ member, disabled, onPatch, onRunningChange }) {
+  const [ranges, setRanges] = useState(() =>
+    Object.fromEntries(MOCK_METRICS.map((m) => [m.metric, { min: m.defaults[0], max: m.defaults[1] }]))
+  );
+  const [running, setRunning] = useState(false);
+  const [last, setLast] = useState({}); // metric -> { value, message, notify }
+  const [resending, setResending] = useState(false);
+  const rangesRef = useRef(ranges);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    rangesRef.current = ranges;
+  }, [ranges]);
+  useEffect(() => () => clearInterval(timerRef.current), []);
+
+  const setRunningBoth = (value) => {
+    setRunning(value);
+    onRunningChange(member.id, value);
+  };
+
+  const stop = () => {
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+    setRunningBoth(false);
+  };
+
+  const sendOne = async (m) => {
+    const range = rangesRef.current[m.metric];
+    if (m.metric === 'hr') {
+      const res = await api.post(`/api/family-members/${member.id}/mock-hr`, {
+        bpmMin: Number(range.min),
+        bpmMax: Number(range.max),
+      });
+      const { bpm, message, notify } = res.data;
+      onPatch(member.id, { heart_rate: `${bpm} bpm`, status: bpm > 100 || bpm < 50 ? 'อันตราย' : 'ปกติ' });
+      return [m.metric, { value: bpm, message, notify }];
+    }
+    const res = await api.post(`/api/family-members/${member.id}/mock-vital`, {
+      metric: m.metric,
+      min: Number(range.min),
+      max: Number(range.max),
+    });
+    onPatch(member.id, { [m.metric]: res.data.value });
+    return [m.metric, { value: res.data.value, message: res.data.message }];
+  };
+
+  // สุ่มทุกค่าพร้อมกัน ถ้ามีค่าไหนผิด (เช่น แก้ช่องเป็นค่าที่ไม่ถูกต้องระหว่างสุ่ม) -> หยุดแล้วบอกเหตุผล
+  const sendAll = async () => {
+    const results = await Promise.allSettled(MOCK_METRICS.map(sendOne));
+    const ok = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+    setLast((prev) => ({ ...prev, ...Object.fromEntries(ok) }));
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) {
+      stop();
+      alert(failed.reason?.response?.data?.error || 'จำลองข้อมูลไม่สำเร็จ หยุดสุ่มแล้ว');
+    }
+  };
+
+  const toggle = (e) => {
+    e.preventDefault();
+    if (running) return stop();
+    const bad = MOCK_METRICS.find((m) => Number(ranges[m.metric].min) > Number(ranges[m.metric].max));
+    if (bad) {
+      alert(`${bad.label}: ค่าต่ำสุดต้องไม่มากกว่าสูงสุด`);
+      return;
+    }
+    // ช่วงชีพจรที่อาจเข้าเงื่อนไขแจ้งเตือน (สูงกว่า 120 / ต่ำกว่า 50) ถามยืนยันก่อน เพราะอาจส่ง LINE จริง
+    const hr = ranges.hr;
+    if ((Number(hr.max) > 120 || Number(hr.min) < 50) &&
+        !window.confirm(`เริ่มสุ่มค่าของ "${member.name}" (ชีพจร ${hr.min}-${hr.max} bpm) ทุก 3 วินาที? ถ้าเข้าเงื่อนไข ระบบจะเปิดเคสฉุกเฉินและส่งแจ้งเตือนทาง LINE (เตือนซ้ำไม่ถี่กว่าทุก 10 นาที)`)) return;
+
+    sendAll();
+    timerRef.current = setInterval(sendAll, MOCK_RANDOM_MS);
+    setRunningBoth(true);
+  };
+
+  // ชีพจร: เพิ่งเตือนไปไม่ถึง 10 นาที (throttled) -> กดส่งแจ้งเตือนค่าล่าสุดเองได้ทันที
+  const resend = async () => {
+    try {
+      setResending(true);
+      const res = await api.post(`/api/family-members/${member.id}/resend-alert`);
+      setLast((prev) => ({
+        ...prev,
+        hr: { value: res.data.bpm ?? prev.hr?.value, message: res.data.message, notify: res.data.notify },
+      }));
+    } catch (err) {
+      alert(err.response?.data?.error || 'ส่งแจ้งเตือนไม่สำเร็จ');
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const input = (m, key, label) => (
+    <input
+      type="number"
+      min={m.min}
+      max={m.max}
+      step={m.step}
+      required
+      aria-label={`${m.label}${label}`}
+      placeholder={label}
+      value={ranges[m.metric][key]}
+      onChange={(e) => setRanges((r) => ({ ...r, [m.metric]: { ...r[m.metric], [key]: e.target.value } }))}
+      className="w-20 rounded-lg border border-amber-200 bg-white px-2 py-1 text-[11px] text-slate-700 outline-none focus:border-amber-400"
+    />
+  );
+
+  return (
+    <form onSubmit={toggle} className="flex flex-col gap-1.5">
+      {MOCK_METRICS.map((m) => {
+        const l = last[m.metric];
+        return (
+          <div key={m.metric} className="flex flex-wrap items-center gap-1.5">
+            <span className="w-16 text-[10px] font-bold text-amber-700 px-1">{m.label}:</span>
+            {input(m, 'min', 'ต่ำสุด')}
+            <span className="text-[11px] text-amber-700">–</span>
+            {input(m, 'max', 'สูงสุด')}
+            <span className="w-8 text-[11px] text-amber-700">{m.unit}</span>
+            {l && (
+              <span className="flex items-center gap-1.5 text-[11px] text-amber-800" aria-live="polite">
+                ล่าสุด <b>{l.value}</b> {m.unit}
+                {l.notify === 'throttled' ? (
+                  <button
+                    type="button"
+                    onClick={resend}
+                    disabled={resending}
+                    className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-[11px] font-medium px-3 py-1 rounded-full transition cursor-pointer shadow-sm"
+                  >
+                    {resending ? 'กำลังส่ง...' : '🔔 แจ้งเตือนค่าล่าสุด'}
+                  </button>
+                ) : (
+                  l.message && <> · {l.message}</>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })}
+
+      <div>
+        <button
+          type="submit"
+          disabled={disabled && !running}
+          title={disabled && !running ? 'หยุด Auto Mock ก่อน ไม่งั้นค่าจะถูกสุ่มทับ' : undefined}
+          className={`disabled:opacity-50 disabled:cursor-not-allowed text-white text-[11px] font-medium px-4 py-1.5 rounded-full transition cursor-pointer shadow-sm ${
+            running ? 'bg-slate-600 hover:bg-slate-700 animate-pulse' : 'bg-rose-500 hover:bg-rose-600'
+          }`}
+        >
+          {running ? '⏹️ หยุดสุ่มทั้งหมด' : '▶️ เริ่มสุ่มทั้งหมด (3s)'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function Party2() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -83,6 +250,7 @@ export default function Party2() {
   const [isDevMode, setIsDevMode] = useState(false);
   
   const [autoMockMap, setAutoMockMap] = useState({});
+  const [randomRunning, setRandomRunning] = useState({}); // memberId -> กำลังสุ่มค่าใน Dev Mode อยู่ไหม
 
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -265,6 +433,20 @@ export default function Party2() {
 
     } catch (err) {
       console.error('Failed to mock data:', err);
+    } finally {
+      setMockingId(null);
+    }
+  };
+
+  // Dev Mode: จำลองการล้ม -> server เปิดเคสฉุกเฉิน + ส่ง LINE ผู้ดูแล
+  const handleMockFall = async (member) => {
+    if (!window.confirm(`จำลองว่า "${member.name}" ล้ม? ระบบจะเปิดเคสฉุกเฉินและส่งแจ้งเตือนทาง LINE`)) return;
+    try {
+      setMockingId(member.id);
+      const res = await api.post(`/api/family-members/${member.id}/mock-fall`);
+      alert(`🚨 จำลองการล้มแล้ว\n${res.data.message}`);
+    } catch (err) {
+      alert(err.response?.data?.error || 'จำลองการล้มไม่สำเร็จ');
     } finally {
       setMockingId(null);
     }
@@ -619,12 +801,15 @@ export default function Party2() {
                 </div>
 
                 {isDevMode && (
-                  <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5 bg-amber-50/80 p-2 rounded-2xl border-dashed border-amber-300">
+                  <div className="mt-2 flex flex-col gap-2 bg-amber-50/80 p-2 rounded-2xl border border-dashed border-amber-300">
+                  <div className="flex items-center gap-1.5">
                     <span className="text-[10px] font-bold text-amber-700 px-1">MOCK:</span>
-                    
+
                     <button
                       onClick={() => handleToggleAutoMock(member)}
-                      className={`text-[11px] font-medium px-3.5 py-1 rounded-full transition flex items-center gap-1 cursor-pointer shadow-sm ${
+                      disabled={Boolean(randomRunning[member.id])}
+                      title={randomRunning[member.id] ? 'หยุดสุ่มค่าก่อน' : undefined}
+                      className={`disabled:opacity-50 disabled:cursor-not-allowed text-[11px] font-medium px-3.5 py-1 rounded-full transition flex items-center gap-1 cursor-pointer shadow-sm ${
                         autoMockMap[member.id]
                           ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
                           : 'bg-amber-500 hover:bg-amber-600 text-white'
@@ -635,12 +820,25 @@ export default function Party2() {
                     </button>
 
                     <button
-                      onClick={() => handleMockSync(member, { heart_rate: '145 bpm', status: 'อันตราย' })}
+                      onClick={() => handleMockFall(member)}
                       disabled={mockingId === member.id}
-                      className="bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white text-[11px] font-medium px-3 py-1 rounded-full transition flex items-center gap-1 cursor-pointer shadow-sm"
+                      className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-[11px] font-medium px-3 py-1 rounded-full transition flex items-center gap-1 cursor-pointer shadow-sm"
                     >
-                      <AlertTriangle className="w-3 h-3" /> จำลองอันตราย
+                      🚨 จำลองการล้ม
                     </button>
+                  </div>
+
+                  {/* สุ่มชีพจร / ก้าวเดิน / การนอน / ความเครียด / ออกซิเจน ในช่วงที่กำหนด ด้วยปุ่มเดียว */}
+                  <MockRandomPanel
+                    member={member}
+                    disabled={Boolean(autoMockMap[member.id])}
+                    onPatch={(memberId, patch) =>
+                      setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, ...patch, is_connected: 1 } : m)))
+                    }
+                    onRunningChange={(memberId, running) =>
+                      setRandomRunning((prev) => ({ ...prev, [memberId]: running }))
+                    }
+                  />
                   </div>
                 )}
 

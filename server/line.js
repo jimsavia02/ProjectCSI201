@@ -29,8 +29,12 @@ const LOGIN_TOKEN_MINUTES = 5; // magic link ใช้ได้ครั้ง�
 const LINK_CODE_MINUTES = 10; // รหัสจับคู่หมดอายุใน 10 นาที
 const SNOOZE_MINUTES = 10; // พิมพ์ "ปลอดภัย" ใน LINE -> พักการแจ้งเตือน 10 นาที
 const SNOOZE_WORD = "ปลอดภัย";
-export const HR_HIGH = 100; // เกณฑ์เดียวกับสถานะ "อันตราย" ที่ใช้ทั้งระบบ
-export const HR_LOW = 50;
+// เงื่อนไขการแจ้งเตือน (สมาชิกแต่ละคนเปิด/ปิดแต่ละข้อได้ในหน้านัดหมาย)
+export const HR_HIGH = 120; // ชีพจรสูงกว่านี้แจ้งทันที
+export const HR_LOW = 50; // ชีพจรต่ำกว่านี้แจ้งทันที
+export const STRESS_HIGH = 80; // ความเครียดสูงกว่านี้...
+export const STRESS_MINUTES = 30; // ...ต่อเนื่องเกินกี่นาทีถึงแจ้ง
+const REMIND_MINUTES = 10; // ยังผิดปกติอยู่ -> เตือนซ้ำได้ไม่ถี่กว่าทุก 10 นาที
 
 const lineHeaders = () => ({ Authorization: `Bearer ${ACCESS_TOKEN}` });
 
@@ -266,40 +270,96 @@ const logPushError = (err) => {
 
 // ผลการแจ้งเตือน (หน้าเหตุฉุกเฉินของ admin เอาไปลงไทม์ไลน์ของเคส)
 //   "sent" ส่งแล้ว | "not_linked" ผู้ดูแลยังไม่เชื่อม LINE | "snoozed" ผู้ดูแลกดพักไว้
-//   "normal" ชีพจรปกติ ไม่ต้องส่ง | "disabled" ยังไม่ได้ตั้งค่า LINE | "error" ส่งไม่สำเร็จ
+//   "muted" ผู้ดูแลปิดสวิตช์แจ้งเตือนในหน้าตั้งค่า | "throttled" เพิ่งเตือนไปไม่ถึง 10 นาที (เตือนซ้ำ)
+//   "disabled" ยังไม่ได้ตั้งค่า LINE | "error" ส่งไม่สำเร็จ
 
-// ส่งแจ้งเตือนทุกครั้งที่ชีพจรเกินเกณฑ์ เรียกได้จากทุกจุดที่อัปเดตชีพจร (ไม่ throw)
+// ส่งแจ้งเตือนเงื่อนไขที่ผิดปกติต่อเนื่อง (ชีพจร / ความเครียด) ไม่ throw
+// reminder = true คือเคสเดิมยังผิดปกติอยู่ -> ส่งซ้ำได้ไม่ถี่กว่าทุก REMIND_MINUTES นาที
 // หยุดชั่วคราวได้ด้วยการพิมพ์ "ปลอดภัย" ใน LINE (users.line_snooze_until)
-export async function notifyHeartRate(db, memberId, bpm) {
+async function sendConditionAlert(db, memberId, buildText, { reminder = false } = {}) {
   try {
-    if (!Number.isFinite(bpm) || bpm <= 0) return "normal";
-    if (bpm <= HR_HIGH && bpm >= HR_LOW) return "normal";
     if (!ACCESS_TOKEN) return "disabled";
 
     // หา LINE ของเจ้าของสมาชิกคนนี้เท่านั้น
     const [[row]] = await db.execute(
-      `SELECT f.name, u.line_user_id, (u.line_snooze_until > NOW()) AS snoozed
+      `SELECT f.name, u.line_user_id, u.line_alerts_enabled, (u.line_snooze_until > NOW()) AS snoozed,
+              (f.last_alert_at > NOW() - INTERVAL ${REMIND_MINUTES} MINUTE) AS recent
        FROM family_members f JOIN users u ON u.id = f.user_id
        WHERE f.id = ?`,
       [memberId]
     );
     if (!row?.line_user_id) return "not_linked";
+    if (!row.line_alerts_enabled) return "muted";
     if (row.snoozed) return "snoozed";
+    if (reminder && row.recent) return "throttled";
 
     await db.execute("UPDATE family_members SET last_alert_at = NOW() WHERE id = ?", [memberId]);
-
-    const direction = bpm > HR_HIGH ? `สูงกว่าเกณฑ์ (${HR_HIGH} bpm)` : `ต่ำกว่าเกณฑ์ (${HR_LOW} bpm)`;
     await pushMessage(
       row.line_user_id,
-      `⚠️ แจ้งเตือนชีพจรผิดปกติ\n\n` +
-        `👤 ${row.name}\n` +
-        `❤️ ชีพจร ${bpm} bpm — ${direction}\n` +
-        `🕒 ${nowText()}\n\n` +
+      buildText(row.name) +
+        `\n🕒 ${nowText()}\n\n` +
         `กรุณาติดต่อหรือตรวจสอบอาการโดยเร็ว\n` +
         `พิมพ์ "${SNOOZE_WORD}" เพื่อพักการแจ้งเตือน ${SNOOZE_MINUTES} นาที`,
       SNOOZE_QUICK_REPLY
     );
-    console.log(`LINE alert sent: member=${memberId} bpm=${bpm}`);
+    console.log(`LINE alert sent: member=${memberId}`);
+    return "sent";
+  } catch (err) {
+    logPushError(err);
+    return "error";
+  }
+}
+
+// ชีพจรเข้าเงื่อนไข (สูงต่อเนื่อง หรือ ต่ำ) — ตัดสินว่าเข้าเงื่อนไขหรือไม่ที่ emergency.js
+export const notifyHeartRate = (db, memberId, bpm, opts) =>
+  sendConditionAlert(
+    db,
+    memberId,
+    (name) =>
+      `⚠️ แจ้งเตือนชีพจรผิดปกติ\n\n👤 ${name}\n❤️ ชีพจร ${bpm} bpm — ` +
+      (bpm > HR_HIGH ? `สูงกว่า ${HR_HIGH} bpm` : `ต่ำกว่า ${HR_LOW} bpm`),
+    opts
+  );
+
+// ความเครียดสูงต่อเนื่อง
+export const notifyStress = (db, memberId, level, opts) =>
+  sendConditionAlert(
+    db,
+    memberId,
+    (name) =>
+      `⚠️ แจ้งเตือนความเครียดสูง\n\n👤 ${name}\n😣 ระดับความเครียด ${level} — สูงกว่า ${STRESS_HIGH} ต่อเนื่องเกิน ${STRESS_MINUTES} นาที`,
+    opts
+  );
+
+// แจ้งเตือนการล้ม: เป็นเหตุครั้งเดียวและอันตรายกว่า จึงส่งแม้กดพัก "ปลอดภัย" ไว้
+// (ไม่ส่งเฉพาะตอนผู้ดูแลปิดสวิตช์แจ้งเตือนในหน้าตั้งค่า) คืนผลแบบเดียวกับ notifyHeartRate ไม่ throw
+export async function notifyFall(db, memberId) {
+  try {
+    if (!ACCESS_TOKEN) return "disabled";
+    const [[row]] = await db.execute(
+      `SELECT f.name, f.emergency_contact_name, f.emergency_contact_phone, u.line_user_id, u.line_alerts_enabled
+       FROM family_members f JOIN users u ON u.id = f.user_id
+       WHERE f.id = ?`,
+      [memberId]
+    );
+    if (!row?.line_user_id) return "not_linked";
+    if (!row.line_alerts_enabled) return "muted";
+
+    // LINE ทำเบอร์โทรในข้อความเป็นลิงก์กดโทรให้เอง
+    const contact = row.emergency_contact_phone
+      ? `📞 ผู้ติดต่อฉุกเฉิน: ${row.emergency_contact_name || "-"} ${row.emergency_contact_phone}\n\n`
+      : "";
+    await pushMessage(
+      row.line_user_id,
+      `🚨 ตรวจพบการล้ม\n\n` +
+        `👤 ${row.name}\n` +
+        `🕒 ${nowText()}\n\n` +
+        contact +
+        `กรุณาติดต่อหรือไปดูอาการโดยด่วน\n` +
+        `ตอบ "${SNOOZE_WORD}" เมื่อตรวจสอบแล้วว่าปลอดภัย`,
+      SNOOZE_QUICK_REPLY
+    );
+    console.log(`LINE fall alert sent: member=${memberId}`);
     return "sent";
   } catch (err) {
     logPushError(err);
@@ -408,7 +468,7 @@ async function handleEvent(db, event) {
   await useLinkedRichMenu(lineUserId);
   await replyMessage(
     event.replyToken,
-    `✅ เชื่อมกับบัญชี "${user.name}" สำเร็จ\n\nจะแจ้งเตือนทาง LINE นี้ทุกครั้งที่ชีพจรของสมาชิกในบัญชีนี้สูงกว่า ${HR_HIGH} หรือต่ำกว่า ${HR_LOW} bpm\nพิมพ์ "${SNOOZE_WORD}" เพื่อพักการแจ้งเตือน ${SNOOZE_MINUTES} นาที`
+    `✅ เชื่อมกับบัญชี "${user.name}" สำเร็จ\n\nจะแจ้งเตือนทาง LINE นี้เมื่อสมาชิกในบัญชีนี้เข้าเงื่อนไขการแจ้งเตือน (ชีพจรสูง/ต่ำ ความเครียดสูง การล้ม) ตั้งค่าได้ในหน้านัดหมายบนเว็บ\nพิมพ์ "${SNOOZE_WORD}" เพื่อพักการแจ้งเตือน ${SNOOZE_MINUTES} นาที`
   );
 }
 
@@ -438,13 +498,16 @@ export function registerLineRoutes(app, db, verifyUser) {
   app.get("/api/line/status", verifyUser, async (req, res) => {
     try {
       const [[user]] = await db.execute(
-        "SELECT line_user_id, IF(line_snooze_until > NOW(), line_snooze_until, NULL) AS snooze_until FROM users WHERE id = ?",
+        `SELECT line_user_id, line_alerts_enabled,
+                IF(line_snooze_until > NOW(), line_snooze_until, NULL) AS snooze_until
+         FROM users WHERE id = ?`,
         [req.user.id]
       );
       const bot = await getBotInfo();
       return res.json({
         enabled: Boolean(ACCESS_TOKEN && CHANNEL_SECRET),
         linked: Boolean(user?.line_user_id),
+        alertsEnabled: Boolean(user?.line_alerts_enabled ?? 1),
         snoozedUntil: user?.snooze_until ?? null,
         snoozeWord: SNOOZE_WORD,
         botName: bot?.displayName ?? null,
@@ -482,6 +545,22 @@ export function registerLineRoutes(app, db, verifyUser) {
     } catch (err) {
       console.error("LINE link code error:", err);
       return res.status(500).json({ error: "สร้างรหัสไม่สำเร็จ" });
+    }
+  });
+
+  // สวิตช์เปิด/ปิดแจ้งเตือนชีพจรทาง LINE (ยังเชื่อมบัญชีไว้เหมือนเดิม ปุ่มเมนูในแชทยังใช้ได้)
+  app.put("/api/line/alerts", verifyUser, async (req, res) => {
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== "boolean") return res.status(400).json({ error: "ค่าไม่ถูกต้อง" });
+    try {
+      await db.execute("UPDATE users SET line_alerts_enabled = ? WHERE id = ?", [enabled ? 1 : 0, req.user.id]);
+      return res.json({
+        alertsEnabled: enabled,
+        message: enabled ? "เปิดการแจ้งเตือนทาง LINE แล้ว" : "ปิดการแจ้งเตือนทาง LINE แล้ว",
+      });
+    } catch (err) {
+      console.error("LINE alerts toggle error:", err);
+      return res.status(500).json({ error: "บันทึกการตั้งค่าไม่สำเร็จ" });
     }
   });
 

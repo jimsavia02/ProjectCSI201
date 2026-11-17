@@ -3,6 +3,14 @@ import { Link, useNavigate } from 'react-router-dom'
 import { HandHeart, Heart, Lock, Mail } from 'lucide-react'
 import api, { getErrorMessage } from '../api.js'
 
+// ลบข้อมูล "จดจำฉัน" (อีเมล + รหัสผ่าน) ที่เวอร์ชันก่อนเคยบันทึกไว้ในเบราว์เซอร์
+// ฟีเจอร์นี้ถูกเอาออกแล้ว เพราะเก็บรหัสผ่านเป็นข้อความธรรมดาใน localStorage
+try {
+  localStorage.removeItem('rememberLogin')
+} catch {
+  // เบราว์เซอร์บล็อก localStorage ก็ไม่เป็นไร
+}
+
 function Login() {
   const [values, setValues] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
