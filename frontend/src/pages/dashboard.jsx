@@ -12,7 +12,27 @@ const numberText = (v) => {
   return text || '-';
 };
 
-// ระดับความเครียดแบบ Garmin (0-100)
+// ===== [แก้ไข] เริ่ม: คำนวณความเครียด = 0.6*ชีพจร + 0.25*การนอน + 0.15*การเดิน =====
+// แปลงแต่ละค่าเป็นคะแนน 0-100 ก่อน (100 = เครียดมาก) ไม่อย่างนั้นก้าวเดินหลักพันจะกลบค่าอื่นหมด
+const toNumber = (v) => {
+  const n = parseFloat(String(v ?? '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+const clamp100 = (n) => Math.min(100, Math.max(0, n));
+
+const calcStress = (heartRate, sleepHours, steps) => {
+  const hr = toNumber(heartRate);
+  const sleep = toNumber(sleepHours);
+  const walk = toNumber(steps);
+  if (!hr || sleep == null || walk == null) return null; // ข้อมูลไม่ครบ คำนวณไม่ได้
+
+  const hrScore = clamp100(((hr - 60) / (120 - 60)) * 100); // 60 bpm = 0, 120 bpm ขึ้นไป = 100
+  const sleepScore = clamp100(((8 - sleep) / (8 - 4)) * 100); // นอน 8 ชม.ขึ้นไป = 0, 4 ชม.ลงไป = 100
+  const walkScore = clamp100(((6000 - walk) / 6000) * 100); // เดินถึง 6,000 ก้าว = 0, ไม่เดินเลย = 100
+
+  return Math.round(0.6 * hrScore + 0.25 * sleepScore + 0.15 * walkScore);
+};
+
 const stressLevel = (v) => {
   if (v == null) return '';
   if (v <= 25) return 'ผ่อนคลาย';
@@ -20,6 +40,7 @@ const stressLevel = (v) => {
   if (v <= 75) return 'ปานกลาง';
   return 'สูง';
 };
+// ===== [แก้ไข] จบ =====
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -184,7 +205,8 @@ function Dashboard() {
       </div>
 
       {/* แผงแสดงค่าสุขภาพหลัก */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      {/* ===== [แก้ไข] เปลี่ยนจาก 3 คอลัมน์เป็น 4 คอลัมน์ (จอเล็กเป็น 2 คอลัมน์) เพื่อใส่การ์ดความเครียด ===== */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
         <div className="bg-pink-50/70 p-6 rounded-3xl border border-pink-100 flex flex-col justify-between shadow-sm">
           <div className="flex justify-between items-start">
             <span className="text-slate-600 font-medium text-sm">ชีพจรปัจจุบัน</span>
@@ -207,39 +229,62 @@ function Dashboard() {
           </span>
         </div>
 
-        <div className="md:col-span-2 grid grid-cols-2 gap-4">
-          <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
-            <div>
-              <p className="text-xs text-slate-400 font-medium">ก้าวเดิน</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">{numberText(memberData?.steps)} <span className="text-xs font-normal text-slate-500">ก้าว</span></p>
-            </div>
-            <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">👟</div>
+        {/* ===== [แก้ไข] เริ่ม: เอาความเครียด/ออกซิเจนในเลือดออก และขยายก้าวเดิน/การนอนให้ขนาดเท่าการ์ดชีพจร ===== */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 flex flex-col justify-between shadow-sm">
+          <div className="flex justify-between items-start">
+            <span className="text-slate-600 font-medium text-sm">ก้าวเดิน</span>
+            <span className="w-8 h-8 bg-pink-50 rounded-full flex items-center justify-center text-pink-500 shadow-sm">👟</span>
           </div>
-
-          <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
-            <div>
-              <p className="text-xs text-slate-400 font-medium">การนอน</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">{numberText(memberData?.sleep)} <span className="text-xs font-normal text-slate-500">ชม.</span></p>
-            </div>
-            <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">🌙</div>
+          <div className="my-4">
+            <span className="text-5xl font-extrabold text-slate-800">{numberText(memberData?.steps)}</span>
+            <span className="ml-2 text-slate-500 font-medium">ก้าว</span>
           </div>
-
-          <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
-            <div>
-              <p className="text-xs text-slate-400 font-medium">ความเครียด</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">{memberData?.stress ?? '-'} <span className="text-xs font-normal text-slate-500">{stressLevel(memberData?.stress)}</span></p>
-            </div>
-            <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">🧘</div>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex justify-between items-center">
-            <div>
-              <p className="text-xs text-slate-400 font-medium">ออกซิเจนในเลือด</p>
-              <p className="text-xl font-bold text-slate-800 mt-1">{memberData?.spo2 ?? '-'} <span className="text-xs font-normal text-slate-500">%</span></p>
-            </div>
-            <div className="w-9 h-9 bg-pink-50 text-pink-500 rounded-2xl flex items-center justify-center text-sm font-bold">⭕</div>
-          </div>
+          <span className="inline-block bg-pink-50 text-pink-600 text-xs px-3 py-1 rounded-full w-fit font-medium shadow-sm">
+            เป้าหมาย 6,000 ก้าว
+          </span>
         </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 flex flex-col justify-between shadow-sm">
+          <div className="flex justify-between items-start">
+            <span className="text-slate-600 font-medium text-sm">การนอน</span>
+            <span className="w-8 h-8 bg-pink-50 rounded-full flex items-center justify-center text-pink-500 shadow-sm">🌙</span>
+          </div>
+          <div className="my-4">
+            <span className="text-5xl font-extrabold text-slate-800">{numberText(memberData?.sleep)}</span>
+            <span className="ml-2 text-slate-500 font-medium">ชม.</span>
+          </div>
+          <span className="inline-block bg-pink-50 text-pink-600 text-xs px-3 py-1 rounded-full w-fit font-medium shadow-sm">
+            ช่วงปกติ 7 – 9 ชม.
+          </span>
+        </div>
+        {/* ===== [แก้ไข] จบ ===== */}
+
+        {/* ===== [แก้ไข] เริ่ม: การ์ดความเครียด (คำนวณจากชีพจร การนอน และก้าวเดิน) ===== */}
+        {(() => {
+          const stress = calcStress(memberData?.heart_rate, memberData?.sleep, memberData?.steps);
+          return (
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 flex flex-col justify-between shadow-sm">
+              <div className="flex justify-between items-start">
+                <span className="text-slate-600 font-medium text-sm">ความเครียด</span>
+                <span className="w-8 h-8 bg-pink-50 rounded-full flex items-center justify-center text-pink-500 shadow-sm">🧘</span>
+              </div>
+              <div className="my-4">
+                {stress != null ? (
+                  <>
+                    <span className="text-5xl font-extrabold text-slate-800">{stress}</span>
+                    <span className="ml-2 text-slate-500 font-medium">{stressLevel(stress)}</span>
+                  </>
+                ) : (
+                  <span className="text-base font-semibold text-slate-400">ข้อมูลไม่พอคำนวณ</span>
+                )}
+              </div>
+              <span className="inline-block bg-pink-50 text-pink-600 text-xs px-3 py-1 rounded-full w-fit font-medium shadow-sm">
+                คะแนน 0 – 100 (ยิ่งน้อยยิ่งดี)
+              </span>
+            </div>
+          );
+        })()}
+        {/* ===== [แก้ไข] จบ ===== */}
       </div>
 
       {/* กราฟชีพจร Real-time */}

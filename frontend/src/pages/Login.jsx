@@ -65,13 +65,13 @@ function Login() {
           <span className="absolute right-16 top-0 h-5 w-5 rounded-full bg-white/70" />
           <span className="absolute right-6 top-12 h-2.5 w-2.5 rounded-full bg-white/90" />
 
-          <p className="mb-6 pl-8 text-lg font-semibold tracking-wide">PINK STUDIO</p>
+          <p className="mb-4 pl-8 text-3xl font-bold tracking-wide drop-shadow-sm">Smart Watch Health</p>
 
-          <div className="relative h-56 w-56">
+          <div className="relative h-64 w-64">
             <span className="absolute inset-0 rounded-full bg-white/25" />
-            <span className="absolute inset-8 rounded-full border-2 border-white/90" />
+            <span className="absolute inset-1 rounded-full border-2 border-white/90" />
             <Heart
-              className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2"
+              className="absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2"
               strokeWidth={1.5}
             />
           </div>
@@ -105,7 +105,7 @@ function Login() {
           onSubmit={handleSubmit}
           className="mx-auto w-full max-w-md rounded-[2rem] border border-white/70 bg-white/35 p-8 shadow-2xl shadow-pink-400/20 backdrop-blur-xl sm:p-10"
         >
-          <p className="mb-6 text-sm font-semibold tracking-wide text-pink-500 md:hidden">PINK STUDIO</p>
+          <p className="mb-6 text-xl font-bold tracking-wide text-pink-1000 md:hidden">Smart Watch Health</p>
 
           <h1 className="flex items-center gap-2 text-3xl font-bold text-slate-800">
             ยินดีต้อนรับ

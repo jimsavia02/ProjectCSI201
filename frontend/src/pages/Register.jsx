@@ -50,7 +50,7 @@ function Register() {
       <div className="relative mx-auto grid min-h-[calc(100vh-5rem)] max-w-6xl items-center gap-10 md:grid-cols-[2fr_3fr]">
         {/* ฝั่งซ้าย: แบรนด์ */}
         <div className="hidden flex-col items-center text-pink-500 md:flex">
-          <p className="mb-6 text-lg font-semibold tracking-wide">PINK STUDIO</p>
+          <p className="mb-6 text-lg font-semibold tracking-wide">Smart Watch Health</p>
 
           <div className="relative h-56 w-56">
             <span className="absolute inset-0 rounded-full bg-white/40" />
@@ -73,13 +73,13 @@ function Register() {
           onSubmit={handleSubmit}
           className="mx-auto w-full max-w-2xl rounded-[2rem] border border-white/70 bg-white/35 p-8 shadow-2xl shadow-pink-400/20 backdrop-blur-xl sm:p-10"
         >
-          <p className="mb-6 text-sm font-semibold tracking-wide text-pink-500 md:hidden">PINK STUDIO</p>
+          <p className="mb-6 text-sm font-semibold tracking-wide text-pink-500 md:hidden">Smart Watch Health</p>
 
           <h1 className="flex items-center gap-2 text-3xl font-bold text-pink-500">
             สร้างบัญชีใหม่
             <HandHeart className="h-8 w-8" strokeWidth={2} aria-hidden="true" />
           </h1>
-          <p className="mt-1 text-sm text-slate-500">สร้างบัญชีของคุณเพื่อเข้าใช้ PINK STUDIO</p>
+          <p className="mt-1 text-sm text-slate-500">สร้างบัญชีของคุณเพื่อเข้าใช้ Smart Watch Health</p>
 
           {error && (
             <p role="alert" className="mt-6 rounded-2xl bg-red-50/90 px-4 py-3 text-sm text-red-600">

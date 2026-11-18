@@ -716,15 +716,8 @@ export default function Party2() {
                 member.status === 'อันตราย' ? 'border-rose-300 bg-rose-50/20' : 'border-slate-100'
               }`}
             >
-              {/* ปุ่มดูรายละเอียด: มุมขวาบนของการ์ด */}
-              <button
-                onClick={() => handleOpenDetailModal(member)}
-                className="absolute top-3 right-4 bg-pink-50 hover:bg-pink-100 text-pink-500 text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 cursor-pointer"
-              >
-                <ExternalLink className="w-3.5 h-3.5" /> ดูรายละเอียด
-              </button>
-
-              <div className="flex items-center gap-4 flex-1 min-w-0 pr-32">
+              {/* ===== [แก้ไข] ย้ายปุ่มดูรายละเอียดลงไปอยู่ในแถวปุ่มด้านขวา (เดิมลอยมุมขวาบน ทับกับปุ่มซิงค์ตอนเปิด Dev Mode) ===== */}
+              <div className="flex items-center gap-4 flex-1 min-w-0">
                 <div className="w-12 h-12 bg-pink-100/60 rounded-xl flex items-center justify-center text-pink-500 font-extrabold text-lg shrink-0 shadow-inner">
                   {avatarLetter}
                 </div>
@@ -769,6 +762,14 @@ export default function Party2() {
               <div className="flex flex-col items-end gap-2 shrink-0 w-full lg:w-auto">
 
                 <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {/* ===== [แก้ไข] เริ่ม: ปุ่มดูรายละเอียด (ย้ายมาจากมุมขวาบน) ===== */}
+                  <button
+                    onClick={() => handleOpenDetailModal(member)}
+                    className="bg-pink-50 hover:bg-pink-100 text-pink-500 text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> ดูรายละเอียด
+                  </button>
+                  {/* ===== [แก้ไข] จบ ===== */}
                   <button
                     onClick={() => handleOpenDeleteModal(member)}
                     className="bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-500 text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1 cursor-pointer"

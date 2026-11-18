@@ -22,20 +22,7 @@ const TABS = [
     format: (v) => `${v.toLocaleString('en-US')} ก้าว`,
     status: (v) => (v >= 6000 ? ['ถึงเป้าแล้ว', 'ok'] : ['ยังไม่ถึงเป้า', 'mid']),
   },
-  {
-    type: 'sleep',
-    label: 'การนอน',
-    range: '7 – 9 ชม.',
-    format: (v) => `${v} ชม.`,
-    status: (v) => (v < 7 ? ['น้อยไป', 'alert'] : v > 9 ? ['มากไป', 'mid'] : ['ปกติ', 'ok']),
-  },
-  {
-    type: 'stress',
-    label: 'ความเครียด',
-    range: '0 – 50',
-    format: (v) => `${v}`,
-    status: (v) => (v > 50 ? ['สูง', 'alert'] : v <= 25 ? ['ผ่อนคลาย', 'ok'] : ['ปกติ', 'ok']),
-  },
+  // ===== [แก้ไข] เอาแท็บ "การนอน" และ "ความเครียด" ออกจากหน้านี้ =====
 ]
 
 const STATUS_STYLES = {

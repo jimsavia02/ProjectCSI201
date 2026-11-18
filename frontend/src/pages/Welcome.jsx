@@ -53,7 +53,7 @@ function Welcome() {
           </div>
           <div className="text-left">
             <strong className="block text-[15px] text-[#3c3038]">
-              PINK STUDIO
+              Smart Watch Health
             </strong>
             <span className="text-[11px] tracking-wider text-[#a88e9b]">
               MEMBER SPACE
@@ -75,7 +75,7 @@ function Welcome() {
           สร้างบัญชีสำเร็จ
         </p>
         <h1 className="text-2xl font-semibold leading-snug text-[#3c3038] md:text-3xl">
-          ยินดีต้อนรับสู่ <span className="text-[#f05289]">PINK STUDIO</span>
+          ยินดีต้อนรับสู่ <span className="text-[#f05289]">Smart Watch Health</span>
         </h1>
         <p className="mx-auto mt-3 max-w-sm text-[#8e7c87]">
           {name ? `สวัสดีคุณ ${name} ` : ""}

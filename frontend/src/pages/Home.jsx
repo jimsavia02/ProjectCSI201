@@ -97,7 +97,7 @@ function Home() {
             </svg>
           </span>
           <div className="min-w-0">
-            <p className="truncate text-[11px] font-bold text-slate-800">PINK STUDIO</p>
+            <p className="truncate text-[11px] font-bold text-slate-800">Smart Watch Health</p>
             <p className="text-[9px] tracking-wide text-slate-400">YOUR SPACE</p>
           </div>
         </div>
@@ -141,7 +141,7 @@ function Home() {
                 <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
               </svg>
             </span>
-            <span className="truncate text-sm font-bold text-slate-800">PINK STUDIO</span>
+            <span className="truncate text-sm font-bold text-slate-800">Smart Watch Health</span>
           </div>
           <h1 className="hidden text-xl font-bold text-slate-800 md:block">Smart Watch Dashboard</h1>
           <div className="flex min-w-0 items-center gap-2 md:gap-4">

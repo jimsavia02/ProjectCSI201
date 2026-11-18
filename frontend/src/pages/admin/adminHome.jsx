@@ -132,7 +132,7 @@ function AdminHome() {
             </svg>
           </span>
           <div className="min-w-0">
-            <p className="truncate text-xs font-bold tracking-wide text-slate-800">PINK STUDIO</p>
+            <p className="truncate text-xs font-bold tracking-wide text-slate-800">Smart Watch Health</p>
             <p className="text-[10px] font-semibold tracking-wider text-slate-400">ADMIN SPACE</p>
           </div>
         </div>
